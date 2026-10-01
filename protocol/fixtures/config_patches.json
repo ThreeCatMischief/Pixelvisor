@@ -1,0 +1,37 @@
+{
+  "cases": [
+    { "name": "name", "patch": { "name": "Desk" }, "valid": true, "reboot_required": false, "expect": { "name": "Desk" } },
+    { "name": "name with umlauts", "patch": { "name": "Lichtleiste über dem Monitor" }, "valid": true, "reboot_required": false },
+    { "name": "led count", "patch": { "led_count": 60 }, "valid": true, "reboot_required": true, "expect": { "led_count": 60 } },
+    { "name": "hostname", "patch": { "hostname": "desk-light-2" }, "valid": true, "reboot_required": true },
+    { "name": "data pin", "patch": { "data_pin": 5 }, "valid": true, "reboot_required": true },
+    { "name": "same led count", "patch": { "led_count": 43 }, "valid": true, "reboot_required": false },
+    {
+      "name": "fields that apply at once",
+      "patch": { "color_order": "RGB", "reverse": true, "max_current_ma": 0, "ma_per_channel": 60, "white_balance": [255, 255, 255], "gamma": 1, "dither": false, "power_on": "off" },
+      "valid": true,
+      "reboot_required": false,
+      "expect": { "color_order": "RGB", "reverse": true, "max_current_ma": 0, "ma_per_channel": 60, "white_balance": [255, 255, 255], "gamma": 1, "dither": false, "power_on": "off" }
+    },
+    { "name": "current limit bounds", "patch": { "max_current_ma": 100 }, "valid": true, "reboot_required": false },
+    { "name": "gamma upper bound", "patch": { "gamma": 3.0 }, "valid": true, "reboot_required": false },
+    { "name": "name empty", "patch": { "name": "" }, "valid": false, "field": "name" },
+    { "name": "name with 33 characters", "patch": { "name": "abcdefghijklmnopqrstuvwxyz0123456" }, "valid": false, "field": "name" },
+    { "name": "hostname with uppercase", "patch": { "hostname": "Desk" }, "valid": false, "field": "hostname" },
+    { "name": "hostname with 25 characters", "patch": { "hostname": "abcdefghijklmnopqrstuvwxy" }, "valid": false, "field": "hostname" },
+    { "name": "led count zero", "patch": { "led_count": 0 }, "valid": false, "field": "led_count" },
+    { "name": "led count above 480", "patch": { "led_count": 481 }, "valid": false, "field": "led_count" },
+    { "name": "data pin on a strapping pin", "patch": { "data_pin": 9 }, "valid": false, "field": "data_pin" },
+    { "name": "data pin on a flash pin", "patch": { "data_pin": 12 }, "valid": false, "field": "data_pin" },
+    { "name": "unknown color order", "patch": { "color_order": "RGBW" }, "valid": false, "field": "color_order" },
+    { "name": "current limit below 100", "patch": { "max_current_ma": 50 }, "valid": false, "field": "max_current_ma" },
+    { "name": "current limit above 20000", "patch": { "max_current_ma": 20001 }, "valid": false, "field": "max_current_ma" },
+    { "name": "ma per channel zero", "patch": { "ma_per_channel": 0 }, "valid": false, "field": "ma_per_channel" },
+    { "name": "white balance with two channels", "patch": { "white_balance": [255, 255] }, "valid": false, "field": "white_balance" },
+    { "name": "gamma below 1", "patch": { "gamma": 0.9 }, "valid": false, "field": "gamma" },
+    { "name": "gamma above 3", "patch": { "gamma": 3.1 }, "valid": false, "field": "gamma" },
+    { "name": "reverse as string", "patch": { "reverse": "yes" }, "valid": false, "field": "reverse" },
+    { "name": "unknown power on", "patch": { "power_on": "always" }, "valid": false, "field": "power_on" },
+    { "name": "one invalid field rejects the whole patch", "patch": { "name": "Ok", "led_count": 0 }, "valid": false, "field": "led_count" }
+  ]
+}

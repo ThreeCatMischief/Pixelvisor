@@ -1,0 +1,20 @@
+{
+  "comment": "One DDP packet per case, as hex. `shown`: realtime is active after the packet. `frame`: the frame then shown, led_count * 3 bytes.",
+  "cases": [
+    { "name": "full frame", "led_count": 3, "packet": "41010b01000000000009ff000000ff000000ff", "shown": true, "frame": "ff000000ff000000ff" },
+    { "name": "timecode is skipped", "led_count": 1, "packet": "51010b0100000000000312345678abcdef", "shown": true, "frame": "abcdef" },
+    { "name": "offset", "led_count": 3, "packet": "41010b01000000030003112233", "shown": true, "frame": "000000112233000000" },
+    { "name": "payload longer than the strip", "led_count": 2, "packet": "41010b01000000000009010203040506070809", "shown": true, "frame": "010203040506" },
+    { "name": "length field beyond the packet", "led_count": 3, "packet": "41010b0100000000000c010203040506", "shown": true, "frame": "010203040506000000" },
+    { "name": "offset beyond the strip", "led_count": 1, "packet": "41010b01000000060003aabbcc", "shown": true, "frame": "000000" },
+    { "name": "destination 255", "led_count": 1, "packet": "41010bff000000000003aabbcc", "shown": true, "frame": "aabbcc" },
+    { "name": "data type 0x01", "led_count": 1, "packet": "41010101000000000003aabbcc", "shown": true, "frame": "aabbcc" },
+    { "name": "data type 0x00", "led_count": 1, "packet": "41010001000000000003aabbcc", "shown": true, "frame": "aabbcc" },
+    { "name": "no push", "led_count": 1, "packet": "40010b01000000000003aabbcc", "shown": false },
+    { "name": "version 2", "led_count": 1, "packet": "81010b01000000000003aabbcc", "shown": false },
+    { "name": "version 0", "led_count": 1, "packet": "01010b01000000000003aabbcc", "shown": false },
+    { "name": "data type RGBW", "led_count": 1, "packet": "41011b01000000000003aabbcc", "shown": false },
+    { "name": "destination 2", "led_count": 1, "packet": "41010b02000000000003aabbcc", "shown": false },
+    { "name": "shorter than a header", "led_count": 1, "packet": "41010b01000000", "shown": false }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "base": {
+    "on": true,
+    "brightness": 128,
+    "mode": "solid",
+    "color": [255, 170, 90],
+    "effect": { "id": "breathe", "speed": 128, "color2": [0, 0, 0] }
+  },
+  "cases": [
+    { "name": "brightness with transition", "patch": { "brightness": 90, "transition_ms": 150 }, "valid": true, "expect": { "brightness": 90 } },
+    { "name": "brightness zero while on", "patch": { "brightness": 0 }, "valid": true, "expect": { "on": true, "brightness": 0 } },
+    { "name": "off", "patch": { "on": false }, "valid": true, "expect": { "on": false, "brightness": 128 } },
+    { "name": "color", "patch": { "color": [255, 120, 40] }, "valid": true, "expect": { "color": [255, 120, 40] } },
+    { "name": "solid mode", "patch": { "mode": "solid" }, "valid": true, "expect": { "mode": "solid" } },
+    { "name": "effect", "patch": { "mode": "effect", "effect": { "id": "rainbow", "speed": 200 } }, "valid": true, "expect": { "mode": "effect", "effect": { "id": "rainbow", "speed": 200, "color2": [0, 0, 0] } } },
+    { "name": "color2 only", "patch": { "effect": { "color2": [0, 0, 255] } }, "valid": true, "expect": { "mode": "solid", "effect": { "id": "breathe", "speed": 128, "color2": [0, 0, 255] } } },
+    { "name": "unknown and read-only fields are ignored", "patch": { "rev": 5, "realtime": { "active": true }, "foo": 1, "brightness": 10 }, "valid": true, "expect": { "brightness": 10 } },
+    { "name": "empty", "patch": {}, "valid": true, "expect": { "brightness": 128 } },
+    { "name": "transition limits", "patch": { "on": true, "transition_ms": 10000 }, "valid": true, "expect": { "on": true } },
+    { "name": "brightness above 255", "patch": { "brightness": 256 }, "valid": false, "field": "brightness" },
+    { "name": "brightness negative", "patch": { "brightness": -1 }, "valid": false, "field": "brightness" },
+    { "name": "brightness not an integer", "patch": { "brightness": 12.5 }, "valid": false, "field": "brightness" },
+    { "name": "brightness as string", "patch": { "brightness": "90" }, "valid": false, "field": "brightness" },
+    { "name": "on as number", "patch": { "on": 1 }, "valid": false, "field": "on" },
+    { "name": "unknown mode", "patch": { "mode": "rainbow" }, "valid": false, "field": "mode" },
+    { "name": "color with two channels", "patch": { "color": [1, 2] }, "valid": false, "field": "color" },
+    { "name": "color channel out of range", "patch": { "color": [0, 300, 0] }, "valid": false, "field": "color" },
+    { "name": "effect not an object", "patch": { "effect": "rainbow" }, "valid": false, "field": "effect" },
+    { "name": "unknown effect", "patch": { "effect": { "id": "fire" } }, "valid": false, "field": "effect.id" },
+    { "name": "speed out of range", "patch": { "effect": { "speed": 999 } }, "valid": false, "field": "effect.speed" },
+    { "name": "color2 out of range", "patch": { "effect": { "color2": [0, 0, 256] } }, "valid": false, "field": "effect.color2" },
+    { "name": "transition too long", "patch": { "transition_ms": 10001 }, "valid": false, "field": "transition_ms" },
+    { "name": "one invalid field rejects the whole patch", "patch": { "brightness": 20, "color": [1, 2, 3, 4] }, "valid": false, "field": "color" },
+    { "name": "body not an object", "patch": [1, 2, 3], "valid": false }
+  ]
+}

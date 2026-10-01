@@ -1,0 +1,9 @@
+{
+  "rev": 0,
+  "on": true,
+  "brightness": 128,
+  "mode": "solid",
+  "color": [255, 170, 90],
+  "effect": { "id": "breathe", "speed": 128, "color2": [0, 0, 0] },
+  "realtime": { "active": false, "source": null }
+}

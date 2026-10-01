@@ -1,0 +1,84 @@
+# On a tag vX.Y.Z: test, build firmware and the macOS app, attach them to a GitHub release
+# and publish the web flasher to GitHub Pages (Settings → Pages → Source: GitHub Actions).
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install platformio
+      - run: pio test -e native
+      - name: Build
+        run: |
+          export PLATFORMIO_BUILD_FLAGS="-DLB_FW_VERSION=\\\"${GITHUB_REF_NAME#v}\\\""
+          pio run -e esp32-c3-supermini -e esp32dev
+      - name: Collect images
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          mkdir -p out site
+          for pair in esp32-c3-supermini:esp32c3 esp32dev:esp32; do
+            env="${pair%%:*}"; chip="${pair##*:}"
+            cp ".pio/build/$env/firmware.bin" "out/pixelvisor-$chip-$v.bin"
+            cp ".pio/build/$env/firmware.factory.bin" "out/pixelvisor-$chip-$v-factory.bin"
+            cp ".pio/build/$env/firmware.factory.bin" "site/pixelvisor-$chip-factory.bin"
+          done
+          cat > site/manifest.json <<JSON
+          {
+            "name": "Pixelvisor",
+            "version": "$v",
+            "new_install_prompt_erase": true,
+            "builds": [
+              { "chipFamily": "ESP32-C3", "parts": [{ "path": "pixelvisor-esp32c3-factory.bin", "offset": 0 }] },
+              { "chipFamily": "ESP32", "parts": [{ "path": "pixelvisor-esp32-factory.bin", "offset": 0 }] }
+            ]
+          }
+          JSON
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: out/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: apps/macos/build.sh test
+      - run: VERSION="${GITHUB_REF_NAME#v}" apps/macos/build.sh app
+      - run: ditto -c -k --keepParent apps/macos/build/Pixelvisor.app "Pixelvisor-macOS-${GITHUB_REF_NAME#v}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: Pixelvisor-macOS-*.zip
+
+  publish:
+    needs: [firmware, macos]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+      - id: pages
+        uses: actions/deploy-pages@v4

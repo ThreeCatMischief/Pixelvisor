@@ -1,0 +1,10 @@
+Third-party code and dependencies
+
+MonitorControl (https://github.com/MonitorControl/MonitorControl), MIT License,
+Copyright (c) 2019-2023 MonitorControl contributors.
+The DDC/CI byte layout, checksums and timing in apps/macos/Sources/DDC.swift follow its
+Arm64DDC.swift.
+
+Firmware dependencies: ArduinoJson (MIT), Adafruit NeoPixel (LGPL-3.0),
+Arduino-ESP32 core (LGPL-2.1).
+Web flasher: ESP Web Tools (Apache-2.0), loaded from unpkg.com.
