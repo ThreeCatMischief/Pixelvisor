@@ -46,7 +46,8 @@ bundle() {
 }
 
 case "${1:-app}" in
-    test) swift test "${test_flags[@]}" ;;
+    # The +"..." form keeps bash 3.2 (macOS /bin/bash) from failing on an empty array under set -u.
+    test) swift test ${test_flags[@]+"${test_flags[@]}"} ;;
     app) bundle ;;
     run)
         bundle

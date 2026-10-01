@@ -22,14 +22,14 @@ No account, no cloud, no app store. It runs entirely on your home network.
 You need an **ESP32-C3 SuperMini** board, a **WS2812B LED strip** and a **5 V power supply**,
 connected together.
 
-1. **Install the software.** Open the [web installer](https://threecatmischief.github.io/Pixelvisor-Public/)
+1. **Install the software.** Open the [web installer](https://threecatmischief.github.io/Pixelvisor/)
    in Chrome or Edge, plug the board into your computer with a USB cable, and click
    *Install*.
 2. **Connect it to WiFi.** Power the light. On your phone, join the WiFi network called
    **Pixelvisor-xxxxxx**. A setup page opens. Pick your home WiFi, enter the password, tap
    *Connect*.
 3. **Use it.** Open <http://pixelvisor.local> in any browser on the same WiFi. On a Mac,
-   you can also install the [menu bar app](https://github.com/ThreeCatMischief/Pixelvisor-Public/releases).
+   you can also install the [menu bar app](https://github.com/ThreeCatMischief/Pixelvisor/releases).
 
 That's it. The rest of this page is reference material.
 
@@ -66,7 +66,7 @@ pio run -e esp32dev -t upload     # classic ESP32
 ```
 
 **With esptool.** Download `pixelvisor-esp32c3-<version>-factory.bin` (or `-esp32-`) from
-the [releases page](https://github.com/ThreeCatMischief/Pixelvisor-Public/releases) and run
+the [releases page](https://github.com/ThreeCatMischief/Pixelvisor/releases) and run
 `esptool.py write_flash 0x0 pixelvisor-…-factory.bin`.
 
 ## WiFi setup details
@@ -91,7 +91,7 @@ Open Settings in the web page or the app:
 ## macOS app
 
 Download `Pixelvisor-macOS-<version>.zip` from the
-[releases page](https://github.com/ThreeCatMischief/Pixelvisor-Public/releases), unzip,
+[releases page](https://github.com/ThreeCatMischief/Pixelvisor/releases), unzip,
 move `Pixelvisor.app` to Applications and open it. The app is not notarised: on first
 launch, right-click it and choose *Open*, or allow it under System Settings → Privacy &
 Security. macOS asks for Local Network access; the app needs it to find the bar.
