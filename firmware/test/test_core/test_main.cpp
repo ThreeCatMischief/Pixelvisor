@@ -5,6 +5,7 @@
 #include <unity.h>
 
 #include <math.h>
+#include <string.h>
 
 #include <fstream>
 #include <sstream>
@@ -108,6 +109,20 @@ void test_default_config_matches_fixture() {
   JsonDocument doc;
   writeConfig(doc.to<JsonObject>(), DeviceConfig(), false);
   assertJsonEqual(fixture("config.json").as<JsonVariantConst>(), doc.as<JsonVariantConst>(), "config");
+}
+
+// The document must own its strings: the config is often a temporary or a copy taken under a lock.
+void test_config_strings_are_copied() {
+  JsonDocument doc;
+  DeviceConfig c;
+  writeConfig(doc.to<JsonObject>(), c, false);
+  strcpy(c.name, "changed");
+  strcpy(c.hostname, "changed");
+  std::string name, hostname;
+  serializeJson(doc["name"], name);
+  serializeJson(doc["hostname"], hostname);
+  TEST_ASSERT_EQUAL_STRING("\"Pixelvisor\"", name.c_str());
+  TEST_ASSERT_EQUAL_STRING("\"pixelvisor\"", hostname.c_str());
 }
 
 void test_state_patches() {
@@ -540,6 +555,7 @@ int main() {
   RUN_TEST(test_effects_match_fixture);
   RUN_TEST(test_default_state_matches_fixture);
   RUN_TEST(test_default_config_matches_fixture);
+  RUN_TEST(test_config_strings_are_copied);
   RUN_TEST(test_state_patches);
   RUN_TEST(test_config_patches);
   RUN_TEST(test_ddp_packets);

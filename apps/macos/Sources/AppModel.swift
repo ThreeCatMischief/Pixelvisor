@@ -138,7 +138,7 @@ final class AppModel {
 
     /// Runs a request. On a network failure it re-resolves once and retries once; after
     /// that the panel shows disconnected and discovery starts over.
-    private func call<T>(_ request: (PixelvisorAPI) async throws -> T) async throws -> T {
+    private func call<T: Sendable>(_ request: (PixelvisorAPI) async throws -> T) async throws -> T {
         guard let api else { throw PixelvisorError.unreachable }
         do {
             return try await request(api)

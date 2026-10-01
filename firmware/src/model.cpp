@@ -220,8 +220,9 @@ bool patchConfig(JsonVariantConst body, DeviceConfig& config, ApiError& err) {
 }
 
 void writeConfig(JsonObject out, const DeviceConfig& c, bool rebootRequired) {
-  out["name"] = c.name;
-  out["hostname"] = c.hostname;
+  // ArduinoJson stores a const char[N] by pointer as a literal of length N-1; a const char* is copied.
+  out["name"] = static_cast<const char*>(c.name);
+  out["hostname"] = static_cast<const char*>(c.hostname);
   out["led_count"] = c.ledCount;
   out["data_pin"] = c.dataPin;
   out["color_order"] = kColorOrders[c.colorOrder];
