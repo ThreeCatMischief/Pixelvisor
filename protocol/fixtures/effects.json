@@ -1,6 +1,0 @@
-[
-  { "id": "breathe", "name": "Breathe", "uses": ["color", "speed"] },
-  { "id": "rainbow", "name": "Rainbow", "uses": ["speed"] },
-  { "id": "gradient", "name": "Gradient", "uses": ["color", "color2"] },
-  { "id": "scan", "name": "Scan", "uses": ["color", "color2", "speed"] }
-]
