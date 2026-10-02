@@ -51,6 +51,7 @@ final class AppModel {
     @ObservationIgnored private let mirror = MirrorEngine()
     @ObservationIgnored private var power: PowerEvents?
     @ObservationIgnored private var sleep = SleepCoordinator()
+    @ObservationIgnored private var stripDisplayOnline = true
     @ObservationIgnored private var sleepRecord: (wasOn: Bool, wasMirroring: Bool, rev: UInt32?)?
     @ObservationIgnored private var connectTask: Task<Void, Never>?
     @ObservationIgnored private var panelPoll: Task<Void, Never>?
@@ -67,9 +68,13 @@ final class AppModel {
         mirror.onPreview = { colors in Task { @MainActor in AppModel.shared.mirrorPreview = colors } }
         mirror.onStopped = { reason in Task { @MainActor in AppModel.shared.mirrorStopped("Mirroring stopped: \(reason)") } }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { AppModel.shared.follower.displaysChanged() }
+            MainActor.assumeIsolated {
+                AppModel.shared.follower.displaysChanged()
+                AppModel.shared.checkStripDisplay()
+            }
         }
         connect()
+        checkStripDisplay()
     }
 
     var deviceSettings: DeviceSettings {
@@ -430,9 +435,15 @@ final class AppModel {
         mirrorPreview = []
     }
 
-    func mirrorSettingsChanged(_ mirror: MirrorSettings) {
-        deviceSettings.mirror = mirror
-        if mirroring { startMirror() }
+    func mirrorSettingsChanged(_ settings: MirrorSettings) {
+        let previous = deviceSettings.mirror
+        deviceSettings.mirror = settings
+        guard mirroring else { return }
+        if settings.displayUUID == previous.displayUUID && settings.fps == previous.fps, let info {
+            Task { await mirror.update(settings: settings, ledCount: info.ledCount) }
+        } else {
+            startMirror()
+        }
     }
 
     var needsScreenPermission: Bool { mirrorMessage == MirrorError.permissionDenied.errorDescription }
@@ -469,6 +480,16 @@ final class AppModel {
     }
 
     // MARK: - Sleep and lock
+
+    /// The display the strip is mounted on is the one Follow monitor or Mirror uses. Switched
+    /// off or unplugged, it leaves the online list, and the strip turns off as for display sleep.
+    private func checkStripDisplay() {
+        guard let uuid = deviceSettings.follow.displayUUID ?? deviceSettings.mirror.displayUUID else { return }
+        let online = Displays.display(uuid: uuid) != nil
+        guard online != stripDisplayOnline else { return }
+        stripDisplayOnline = online
+        handle(online ? .displayOn : .displayOff)
+    }
 
     private func handle(_ event: PowerEvent) {
         sleep.offOnSleep = settings.offOnSleep

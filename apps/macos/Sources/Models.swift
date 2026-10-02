@@ -166,6 +166,19 @@ struct ConfigPatch: Codable, Hashable, Sendable {
     var powerOn: String?
 }
 
+extension ConfigPatch {
+    /// The fields the settings window edits that differ between `base` and `draft`.
+    init(from base: DeviceConfig, to draft: DeviceConfig) {
+        if draft.name != base.name { name = draft.name }
+        if draft.ledCount != base.ledCount { ledCount = draft.ledCount }
+        if draft.colorOrder != base.colorOrder { colorOrder = draft.colorOrder }
+        if draft.reverse != base.reverse { reverse = draft.reverse }
+        if draft.maxCurrentMa != base.maxCurrentMa { maxCurrentMa = draft.maxCurrentMa }
+        if draft.whiteBalance != base.whiteBalance { whiteBalance = draft.whiteBalance }
+        if draft.powerOn != base.powerOn { powerOn = draft.powerOn }
+    }
+}
+
 /// Error body: `{"error": "...", "field": "..."}`.
 struct APIErrorBody: Codable, Sendable {
     var error: String

@@ -172,8 +172,18 @@ struct PanelView: View {
             Text("Average").tag(MirrorStyle.average)
         }
         .pickerStyle(.segmented)
+        if mirror.style == .zones {
+            labeled("Height") {
+                Slider(value: Binding(get: { mirror.bandHeight }, set: {
+                    var m = mirror
+                    m.bandHeight = $0
+                    model.mirrorSettingsChanged(m)
+                }), in: 0.05...1)
+                Text(mirror.bandHeight.formatted(.percent.precision(.fractionLength(0)))).monospacedDigit().frame(width: 36, alignment: .trailing)
+            }
+        }
         if model.mirroring {
-            PreviewStrip(colors: model.mirrorPreview)
+            PreviewStrip(model: model)
         } else if let message = model.mirrorMessage {
             Text(message).font(.caption).foregroundStyle(.secondary)
             HStack {
@@ -278,14 +288,23 @@ struct ColorBars: View {
     }
 }
 
+/// Reads `mirrorPreview` itself, so its updates (10 per second) redraw only this view and
+/// not the panel or window around it. One Canvas instead of a view per LED.
 struct PreviewStrip: View {
-    let colors: [RGB]
+    let model: AppModel
+    var height: CGFloat = 10
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(colors.enumerated()), id: \.offset) { Rectangle().fill(Color($0.element)) }
+        let colors = model.mirrorPreview
+        Canvas { context, size in
+            guard !colors.isEmpty else { return }
+            let width = size.width / CGFloat(colors.count)
+            for (i, color) in colors.enumerated() {
+                // Overlap by a point so no seams show between LEDs.
+                context.fill(Path(CGRect(x: CGFloat(i) * width, y: 0, width: width + 1, height: size.height)), with: .color(Color(color)))
+            }
         }
-        .frame(height: 10)
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
         .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 }

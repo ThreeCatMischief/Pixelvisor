@@ -4,13 +4,14 @@ import AppKit
 
 enum PowerEvent: Sendable, CaseIterable {
     case willSleep, didWake, screensDidSleep, screensDidWake, locked, unlocked, sessionResigned, sessionActivated
+    case displayOff, displayOn  // the strip's display left or rejoined the online list
 }
 
 /// Decides when to turn the strip off and back on. Several events fire for one sleep
 /// (screens, then system); the strip goes off when the first reason appears and comes back
 /// when the last one clears.
 struct SleepCoordinator: Sendable {
-    enum Reason: Sendable { case sleep, lock }
+    enum Reason: Sendable { case sleep, lock, displayOff }
     enum Action: Equatable, Sendable { case turnOff, restore }
 
     var offOnSleep = true
@@ -24,6 +25,8 @@ struct SleepCoordinator: Sendable {
         case .didWake, .screensDidWake: reasons.remove(.sleep)
         case .locked, .sessionResigned: if offOnLock { reasons.insert(.lock) }
         case .unlocked, .sessionActivated: reasons.remove(.lock)
+        case .displayOff: if offOnSleep { reasons.insert(.displayOff) }
+        case .displayOn: reasons.remove(.displayOff)
         }
         if before.isEmpty && !reasons.isEmpty { return .turnOff }
         if !before.isEmpty && reasons.isEmpty { return .restore }

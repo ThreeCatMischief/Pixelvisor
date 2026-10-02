@@ -12,6 +12,7 @@ enum DDCUnavailable: String, Error, Sendable {
     case unsupportedSystem = "DDC needs Apple Silicon"
     case noExternalDisplay = "No external display found"
     case noResponse = "The display does not answer DDC (dock, adapter or HDMI port?)"
+    case notReported = "The display answers DDC but does not report its brightness"
 }
 
 enum DDC {
@@ -28,6 +29,9 @@ enum DDC {
         guard max > 0 else { return nil }
         return (current, max)
     }
+
+    /// The "null message" a display sends when it has no reply to give.
+    static func isNullReply(_ reply: [UInt8]) -> Bool { reply.starts(with: [0x6E, 0x80, 0xBE]) }
 
     /// The "Get VCP feature" request as written to I²C address 0x37, data address 0x51.
     static func request(vcp: UInt8) -> [UInt8] {
@@ -82,37 +86,72 @@ final class DDCReader: @unchecked Sendable {
         if services[display] == nil { mapServices() }
         guard let service = services[display] else { return .failure(.noExternalDisplay) }
 
+        var nullReplies = 0
         for _ in 0..<3 {
             var packet = DDC.request(vcp: DDC.luminance)
             var reply = [UInt8](repeating: 0, count: 11)
             if write(service, 0x37, 0x51, &packet, UInt32(packet.count)) == kIOReturnSuccess {
                 usleep(40_000)
-                if read(service, 0x37, 0x51, &reply, UInt32(reply.count)) == kIOReturnSuccess,
-                   let value = DDC.parseReply(reply, vcp: DDC.luminance) {
-                    return .success(value)
+                if read(service, 0x37, 0x51, &reply, UInt32(reply.count)) == kIOReturnSuccess {
+                    if let value = DDC.parseReply(reply, vcp: DDC.luminance) { return .success(value) }
+                    if DDC.isNullReply(reply) { nullReplies += 1 }
                 }
             }
             usleep(50_000)
         }
-        return .failure(.noResponse)
+        return .failure(nullReplies == 3 ? .notReported : .noResponse)
     }
 
-    /// Pairs external `DCPAVServiceProxy` entries with external displays in registry order.
+    /// Pairs each external `DCPAVServiceProxy` with a display. In the service plane every
+    /// display controller lists its framebuffer before its AV service, so a service belongs to
+    /// the framebuffer seen last; that framebuffer's EDID identity matches a CGDisplay.
     private func mapServices() {
         guard let create else { return }
         var iterator = io_iterator_t()
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("DCPAVServiceProxy"), &iterator) == KERN_SUCCESS else { return }
+        guard IORegistryCreateIterator(kIOMainPortDefault, kIOServicePlane, IOOptionBits(kIORegistryIterateRecursively), &iterator) == KERN_SUCCESS else { return }
         defer { IOObjectRelease(iterator) }
-        var found: [CFTypeRef] = []
+        let displays = Displays.external()
+        var identity: EDIDIdentity?
+        var mapped: [CGDirectDisplayID: CFTypeRef] = [:]
         while case let entry = IOIteratorNext(iterator), entry != 0 {
             defer { IOObjectRelease(entry) }
-            let location = IORegistryEntryCreateCFProperty(entry, "Location" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String
-            if location == "External", let service = create(kCFAllocatorDefault, entry)?.takeRetainedValue() {
-                found.append(service)
+            func property(_ key: String) -> Any? {
+                IORegistryEntryCreateCFProperty(entry, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
+            }
+            if IOObjectConformsTo(entry, "IOMobileFramebufferShim") != 0 {
+                identity = EDIDIdentity(displayAttributes: property("DisplayAttributes"))
+            } else if IOObjectConformsTo(entry, "DCPAVServiceProxy") != 0, property("Location") as? String == "External" {
+                if let identity, let display = displays.first(where: { identity.matches($0) }),
+                   let service = create(kCFAllocatorDefault, entry)?.takeRetainedValue() {
+                    mapped[display] = service
+                }
+                identity = nil
             }
         }
-        let displays = Displays.external()
-        services = Dictionary(uniqueKeysWithValues: zip(displays, found).map { ($0, $1) })
+        services = mapped
+    }
+}
+
+/// Vendor, product and serial number from the EDID, as IORegistry and CoreGraphics report them.
+struct EDIDIdentity: Equatable {
+    var vendor: UInt32
+    var product: UInt32
+    var serial: UInt32
+
+    init(vendor: UInt32, product: UInt32, serial: UInt32) {
+        (self.vendor, self.product, self.serial) = (vendor, product, serial)
+    }
+
+    /// From an `IOMobileFramebufferShim` "DisplayAttributes" dictionary.
+    init?(displayAttributes: Any?) {
+        guard let product = (displayAttributes as? [String: Any])?["ProductAttributes"] as? [String: Any],
+              let vendor = (product["LegacyManufacturerID"] as? NSNumber)?.uint32Value,
+              let id = (product["ProductID"] as? NSNumber)?.uint32Value else { return nil }
+        self.init(vendor: vendor, product: id, serial: (product["SerialNumber"] as? NSNumber)?.uint32Value ?? 0)
+    }
+
+    func matches(_ display: CGDirectDisplayID) -> Bool {
+        self == EDIDIdentity(vendor: CGDisplayVendorNumber(display), product: CGDisplayModelNumber(display), serial: CGDisplaySerialNumber(display))
     }
 }
 

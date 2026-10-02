@@ -16,7 +16,7 @@ enum OutsideRange: String, Codable, Sendable, CaseIterable {
 struct MirrorSettings: Codable, Hashable, Sendable {
     var displayUUID: String?  // nil: main display
     var style = MirrorStyle.zones
-    var bandHeight = 0.15     // share of the display height
+    var bandHeight = 0.15     // share of the display height, from the top
     var ledStart = 0
     var ledEnd: Int?          // nil: last LED
     var outside = OutsideRange.extend
@@ -118,6 +118,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
 
     private let queue = DispatchQueue(label: "pixelvisor.mirror", qos: .userInteractive)
     private var stream: SCStream?
+    private var display: SCDisplay?
     private var timer: DispatchSourceTimer?
     private var sender: DDPSender?
     private var settings = MirrorSettings()
@@ -147,24 +148,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
         let wanted = Displays.display(uuid: settings.displayUUID) ?? CGMainDisplayID()
         guard let display = content.displays.first(where: { $0.displayID == wanted }) else { throw MirrorError.displayNotFound }
 
-        let end = settings.ledEnd.map { min($0, ledCount - 1) } ?? ledCount - 1
-        let span = max(end - settings.ledStart + 1, 1)
-        let config = SCStreamConfiguration()
-        switch settings.style {
-        case .zones:
-            config.sourceRect = CGRect(x: 0, y: 0, width: CGFloat(display.width), height: CGFloat(display.height) * settings.bandHeight)
-            config.width = min(4 * span, 256)
-            config.height = 8
-        case .average:
-            config.width = 32
-            config.height = 18
-        }
-        config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.colorSpaceName = CGColorSpace.sRGB
-        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(settings.fps))
-        config.showsCursor = false
-        config.queueDepth = 3
-
+        let config = Self.configuration(settings, ledCount: ledCount, displaySize: CGSize(width: display.width, height: display.height))
         let stream = SCStream(filter: SCContentFilter(display: display, excludingApplications: [], exceptingWindows: []),
                               configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
@@ -172,6 +156,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
 
         queue.sync {
             self.stream = stream
+            self.display = display
             self.settings = settings
             self.ledCount = ledCount
             self.target = []
@@ -188,12 +173,57 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
         }
     }
 
+    /// Applies settings to the running stream without restarting it. A restart makes the
+    /// device ignore the strip for about a second, which a dragged slider would repeat.
+    /// Display and frame rate changes still need `start`.
+    func update(settings: MirrorSettings, ledCount: Int) async {
+        let current: (SCStream, SCDisplay)? = queue.sync {
+            guard let stream, let display else { return nil }
+            self.settings = settings
+            self.ledCount = ledCount
+            self.smoother.tau = settings.smoothingMs / 1000
+            return (stream, display)
+        }
+        guard let (stream, display) = current else { return }
+        let config = Self.configuration(settings, ledCount: ledCount, displaySize: CGSize(width: display.width, height: display.height))
+        do {
+            try await stream.updateConfiguration(config)
+        } catch {
+            Self.log.error("updating capture failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    static func configuration(_ settings: MirrorSettings, ledCount: Int, displaySize: CGSize) -> SCStreamConfiguration {
+        let end = settings.ledEnd.map { min($0, ledCount - 1) } ?? ledCount - 1
+        let span = max(end - settings.ledStart + 1, 1)
+        let config = SCStreamConfiguration()
+        switch settings.style {
+        case .zones:
+            let band = min(max(settings.bandHeight, 0.01), 1)
+            config.sourceRect = CGRect(x: 0, y: 0, width: displaySize.width, height: displaySize.height * band)
+            config.width = min(4 * span, 256)
+            // About 8 rows per 15 % of the display, so a tall band is not sampled from a few lines.
+            config.height = max(8, Int((band * 54).rounded()))
+        case .average:
+            config.width = 32
+            config.height = 18
+        }
+        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.preservesAspectRatio = false  // the default letterboxes the wide band, blanking the outer zones
+        config.colorSpaceName = CGColorSpace.sRGB
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(settings.fps))
+        config.showsCursor = false
+        config.queueDepth = 3
+        return config
+    }
+
     func stop() {
         let stream: SCStream? = queue.sync {
             timer?.cancel()
             timer = nil
             sender?.close()
             sender = nil
+            display = nil
             defer { self.stream = nil }
             return self.stream
         }
@@ -266,6 +296,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
             self.sender?.close()
             self.sender = nil
             self.stream = nil
+            self.display = nil
         }
         onStopped?(error.localizedDescription)
     }

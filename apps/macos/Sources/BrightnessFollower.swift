@@ -1,5 +1,7 @@
-// Follow monitor: the strip brightness tracks the external display's brightness setting.
+// Follow monitor: the strip brightness tracks the external display's brightness setting,
+// as MonitorControl last set it or, without MonitorControl, as read over DDC.
 
+import CoreGraphics
 import Foundation
 
 struct BrightnessCurve: Codable, Hashable, Sendable {
@@ -21,6 +23,26 @@ struct FollowSettings: Codable, Hashable, Sendable {
     var curve = BrightnessCurve()
     var level = 1.0
     var pollSeconds = 2.0
+}
+
+/// MonitorControl's stored brightness for a display. It saves the combined slider value
+/// (0...1, DDC plus software dimming) as `value16(<name><vendor><model>@<display ID>)`.
+/// Displays whose DDC cannot be read still have it, since MonitorControl only writes.
+enum MonitorControlPrefs {
+    private static var domain: CFString { "app.monitorcontrol.MonitorControl" as CFString }
+
+    static func brightness(display: CGDirectDisplayID) -> Double? {
+        CFPreferencesAppSynchronize(domain)
+        guard let keys = CFPreferencesCopyKeyList(domain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? [String],
+              let key = key(in: keys, vendor: CGDisplayVendorNumber(display), model: CGDisplayModelNumber(display), display: display)
+        else { return nil }
+        return (CFPreferencesCopyAppValue(key as CFString, domain) as? NSNumber)?.doubleValue
+    }
+
+    static func key(in keys: [String], vendor: UInt32, model: UInt32, display: CGDirectDisplayID) -> String? {
+        let suffix = "\(vendor)\(model)@\(display))"
+        return keys.first { $0.hasPrefix("value16(") && $0.hasSuffix(suffix) }
+    }
 }
 
 enum FollowState: Equatable, Sendable {
@@ -83,16 +105,16 @@ final class BrightnessFollower {
                 try? await Task.sleep(for: .seconds(5))
                 continue
             }
+            if let level = MonitorControlPrefs.brightness(display: display) {
+                failures = 0
+                follow((Int((min(max(level, 0), 1) * 1000).rounded()), 1000), transitionMs: 300)
+                try? await Task.sleep(for: .milliseconds(500))  // a local read, cheap enough to poll fast
+                continue
+            }
             switch await reader.readBrightness(display: display) {
             case let .success(value):
                 failures = 0
-                reading = value
-                let out = settings.curve.output(current: value.current, max: value.max, level: settings.level)
-                state = .following(monitorPercent: percent(value), output: out)
-                if lastSent.map({ abs($0 - out) >= 2 }) ?? true {
-                    lastSent = out
-                    apply(out, 800)
-                }
+                follow(value, transitionMs: 800)
             case .failure(.noResponse):
                 failures += 1
                 if failures >= 3 {
@@ -106,6 +128,16 @@ final class BrightnessFollower {
                 continue
             }
             try? await Task.sleep(for: .seconds(settings.pollSeconds))
+        }
+    }
+
+    private func follow(_ value: (current: Int, max: Int), transitionMs: Int) {
+        reading = value
+        let out = settings.curve.output(current: value.current, max: value.max, level: settings.level)
+        state = .following(monitorPercent: percent(value), output: out)
+        if lastSent.map({ abs($0 - out) >= 2 }) ?? true {
+            lastSent = out
+            apply(out, transitionMs)
         }
     }
 

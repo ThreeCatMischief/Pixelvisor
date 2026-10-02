@@ -99,12 +99,16 @@ Security. macOS asks for Local Network access; the app needs it to find the bar.
 Menu bar panel with power, brightness and four color sources: Color, White, Effect and
 Mirror. Presets store a source with its values.
 
-- **Follow monitor** sets the bar's brightness from your external monitor's brightness,
-  read over DDC/CI. Needs Apple Silicon; does not work through most docks, DisplayLink
-  adapters, or the HDMI port of M1 Macs.
-- **Mirror** streams the colors along the top of a display to the bar. macOS asks for
+- **Follow monitor** sets the bar's brightness from your external monitor's brightness.
+  With [MonitorControl](https://github.com/MonitorControl/MonitorControl) installed, it
+  follows MonitorControl's brightness slider, which also covers monitors that cannot report
+  their brightness. Otherwise it reads the brightness over DDC/CI, which needs Apple Silicon
+  and does not work through most docks, DisplayLink adapters, or the HDMI port of M1 Macs.
+- **Mirror** streams the colors of a display to the bar, from a band along the top whose
+  height you set in the panel (5 % to the full screen). macOS asks for
   Screen Recording permission, and from macOS 15 it asks again from time to time.
-- Turns the bar off on sleep and lock, and back on afterwards.
+- Turns the bar off on sleep, on lock, and when its monitor is switched off or unplugged,
+  and back on afterwards.
 
 ## Security
 
@@ -116,7 +120,7 @@ firmware, like most hobby LED controllers. Put it on a network you trust, or an 
 | Part | Command | Needs |
 | --- | --- | --- |
 | Firmware | `pio run`, `pio test -e native` | PlatformIO |
-| macOS app | `apps/macos/build.sh test`, `apps/macos/build.sh app` | Xcode or the Command Line Tools (Swift 6) |
+| macOS app | `apps/macos/build.sh app` | Xcode or the Command Line Tools (Swift 6) |
 | Firmware update over WiFi | `pio run -e ota -t upload` | `curl` |
 
 Development tools in `tools/` (Python 3, standard library only):

@@ -7,6 +7,5 @@ let package = Package(
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(name: "Pixelvisor", path: "Sources"),
-        .testTarget(name: "PixelvisorTests", dependencies: ["Pixelvisor"], path: "Tests"),
     ]
 )

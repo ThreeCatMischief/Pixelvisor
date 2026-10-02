@@ -15,7 +15,7 @@ struct SettingsView: View {
             MirrorTab(model: model).tabItem { Label("Mirror", systemImage: "display") }
             AboutTab().tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 520)
+        .frame(width: 560, height: 640)
         .padding(20)
     }
 }
@@ -33,7 +33,7 @@ private struct GeneralTab: View {
                     launchAtLogin = LoginItem.isEnabled
                 }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
-            Toggle("Turn off on sleep", isOn: Binding(get: { model.settings.offOnSleep }, set: { model.settings.offOnSleep = $0 }))
+            Toggle("Turn off when the display sleeps or is switched off", isOn: Binding(get: { model.settings.offOnSleep }, set: { model.settings.offOnSleep = $0 }))
             Toggle("Turn off on lock", isOn: Binding(get: { model.settings.offOnLock }, set: { model.settings.offOnLock = $0 }))
         }
     }
@@ -84,12 +84,12 @@ private struct DeviceTab: View {
             if draft != nil {
                 Section("Configuration") {
                     TextField("Name", text: binding(\.name))
-                    TextField("LED count", value: binding(\.ledCount), format: .number)
+                    TextField("LED count", value: binding(\.ledCount), format: .number.grouping(.never))
                     Picker("Color order", selection: binding(\.colorOrder)) {
                         ForEach(DeviceConfig.colorOrders, id: \.self) { Text($0) }
                     }
                     Toggle("First LED is at the right end", isOn: binding(\.reverse))
-                    TextField("Current limit (mA, 0 = off)", value: binding(\.maxCurrentMa), format: .number)
+                    TextField("Current limit (mA, 0 = off)", value: binding(\.maxCurrentMa), format: .number.grouping(.never))
                     LabeledContent("White balance") {
                         HStack {
                             TextField("R", value: binding(\.whiteBalance.r), format: .number)
@@ -103,7 +103,11 @@ private struct DeviceTab: View {
                         Text("Off").tag("off")
                     }
                     HStack {
-                        Button("Apply") { Task { await apply() } }
+                        Button("Save") {
+                            NSApp.keyWindow?.makeFirstResponder(nil)  // number fields update their binding only when editing ends
+                            Task { await save() }
+                        }
+                        .keyboardShortcut("s")
                         if model.config?.rebootRequired == true {
                             Button("Reboot to apply") { model.reboot() }
                         }
@@ -147,20 +151,27 @@ private struct DeviceTab: View {
         Binding(get: { draft![keyPath: path] }, set: { draft![keyPath: path] = $0 })
     }
 
-    /// Sends only the fields that differ from the device's config.
-    private func apply() async {
+    /// Sends the fields that differ from the device's config, then reads the config back
+    /// and reports whether the device holds the edited values.
+    private func save() async {
         guard let draft, let config = model.config else { return }
-        var patch = ConfigPatch()
-        if draft.name != config.name { patch.name = draft.name }
-        if draft.ledCount != config.ledCount { patch.ledCount = draft.ledCount }
-        if draft.colorOrder != config.colorOrder { patch.colorOrder = draft.colorOrder }
-        if draft.reverse != config.reverse { patch.reverse = draft.reverse }
-        if draft.maxCurrentMa != config.maxCurrentMa { patch.maxCurrentMa = draft.maxCurrentMa }
-        if draft.whiteBalance != config.whiteBalance { patch.whiteBalance = draft.whiteBalance }
-        if draft.powerOn != config.powerOn { patch.powerOn = draft.powerOn }
-        guard patch != ConfigPatch() else { return }
-        message = await model.applyConfig(patch) ?? "Saved"
-        if let config = model.config { self.draft = config }
+        let patch = ConfigPatch(from: config, to: draft)
+        guard patch != ConfigPatch() else {
+            message = "No changes"
+            return
+        }
+        message = "Saving…"
+        if let error = await model.applyConfig(patch) {
+            message = error
+            return
+        }
+        await model.loadConfig()
+        guard let stored = model.config else {
+            message = "Sent, but the device did not answer the read-back"
+            return
+        }
+        message = ConfigPatch(from: stored, to: draft) == ConfigPatch() ? "Saved" : "Device stored different values"
+        self.draft = stored
     }
 
     private func chooseFirmware() {
@@ -243,7 +254,7 @@ private struct MirrorTab: View {
                 Text("Zones").tag(MirrorStyle.zones)
                 Text("Average").tag(MirrorStyle.average)
             }
-            slider("Band height", value: mirror.bandHeight, range: 0.05...0.5) { set(\.bandHeight, $0) }
+            slider("Band height (from the top)", value: mirror.bandHeight, range: 0.05...1) { set(\.bandHeight, $0) }
             Stepper("First LED under the screen: \(mirror.ledStart)", value: Binding(get: { mirror.ledStart }, set: { set(\.ledStart, $0) }), in: 0...(leds - 1))
             Stepper("Last LED under the screen: \(mirror.ledEnd ?? leds - 1)",
                     value: Binding(get: { mirror.ledEnd ?? leds - 1 }, set: { set(\.ledEnd, $0 == leds - 1 ? nil : $0) }), in: mirror.ledStart...(leds - 1))
@@ -257,7 +268,7 @@ private struct MirrorTab: View {
                 ForEach([15, 30, 60], id: \.self) { Text("\($0) fps").tag($0) }
             }
             if model.mirroring {
-                PreviewStrip(colors: model.mirrorPreview).frame(height: 16)
+                PreviewStrip(model: model, height: 16)
             } else {
                 Text("Choose Mirror in the panel to see a live preview.").foregroundStyle(.secondary)
             }
