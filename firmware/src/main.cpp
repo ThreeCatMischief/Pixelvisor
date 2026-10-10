@@ -113,6 +113,7 @@ void renderTask(void*) {
     LightState s;
     DeviceConfig c;
     uint16_t transitionMs;
+    Transition transition;
     bool endRealtime;
     Overlay overlay;
     uint32_t overlayStart;
@@ -123,6 +124,7 @@ void renderTask(void*) {
       s = dev.state;
       c = dev.config;
       transitionMs = dev.transitionMs;
+      transition = dev.transition;
       endRealtime = dev.endRealtime;
       dev.endRealtime = false;
       overlay = dev.overlay;
@@ -146,7 +148,7 @@ void renderTask(void*) {
 
     c.ledCount = n;
     pipeline.configure(c);
-    compositor.render(s, transitionMs, live ? realtime.frame() : nullptr, now);
+    compositor.render(s, transitionMs, transition, live ? realtime.frame() : nullptr, now);
     uint8_t* out = strip.getPixels();
     if (renderOverlay(overlay, now - overlayStart, progress, overlayFrame, n)) {
       pipeline.processLinear(overlayFrame, out);

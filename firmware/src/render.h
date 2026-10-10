@@ -13,13 +13,16 @@ class Compositor {
   void begin(uint16_t n, const LightState& s, uint32_t now);
   // Renders the frame for `now`. `realtime` is the current DDP frame (RGB8) or null. A
   // change against the previous call starts a crossfade or brightness ramp lasting
-  // `transitionMs`; entering realtime takes 150 ms, leaving it 400 ms.
-  void render(const LightState& s, uint16_t transitionMs, const uint8_t* realtime, uint32_t now);
-  const Rgb16* frame() const { return shown_; }
+  // `transitionMs`; entering realtime takes 150 ms, leaving it 400 ms. A change of `on`
+  // with Transition::Wipe also reveals or hides the strip from both ends over the same time.
+  void render(const LightState& s, uint16_t transitionMs, Transition transition, const uint8_t* realtime,
+              uint32_t now);
+  const Rgb16* frame() const { return reveal_ < 65535 ? masked_ : shown_; }
   uint16_t brightness() const { return brightness_; }  // 0-65535
 
  private:
   void renderSource(const LightState& s, const uint8_t* realtime, Rgb16* out) const;
+  void mask();
 
   uint16_t n_ = 0;
   LightState prev_;
@@ -29,9 +32,13 @@ class Compositor {
   uint32_t fadeStart_ = 0, fadeMs_ = 0;
   uint32_t rampStart_ = 0, rampMs_ = 0;
   uint16_t rampFrom_ = 0, rampTo_ = 0, brightness_ = 0;
+  // Lit share of each half of the strip, 0-65535; below 65535 frame() is masked_.
+  uint32_t revealStart_ = 0, revealMs_ = 0;
+  uint16_t revealFrom_ = 65535, revealTo_ = 65535, reveal_ = 65535;
   Rgb16 from_[kMaxLeds] = {};
   Rgb16 source_[kMaxLeds] = {};
   Rgb16 shown_[kMaxLeds] = {};
+  Rgb16 masked_[kMaxLeds] = {};
 };
 
 // Turns a composed frame into strip bytes: brightness, gamma, white balance, current

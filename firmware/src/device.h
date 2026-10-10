@@ -15,6 +15,7 @@ struct Device {
   LightState state;
   uint32_t rev = 0;
   uint16_t transitionMs = 400;    // of the last state patch
+  Transition transition = Transition::Fade;  // of the last state patch
   bool endRealtime = false;       // set by a PATCH with mode, cleared by the render task
   bool realtimeActive = false;    // reported by the render task
   uint32_t realtimeSource = 0;    // IPv4 address

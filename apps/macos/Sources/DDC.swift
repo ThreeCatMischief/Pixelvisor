@@ -30,10 +30,10 @@ enum DDC {
         return (current, max)
     }
 
+    /// The "Get VCP feature" request as written to I²C address 0x37, data address 0x51.
     /// The "null message" a display sends when it has no reply to give.
     static func isNullReply(_ reply: [UInt8]) -> Bool { reply.starts(with: [0x6E, 0x80, 0xBE]) }
 
-    /// The "Get VCP feature" request as written to I²C address 0x37, data address 0x51.
     static func request(vcp: UInt8) -> [UInt8] {
         var packet: [UInt8] = [0x82, 0x01, vcp, 0]
         packet[3] = packet[0..<3].reduce(UInt8(0x6E)) { $0 ^ $1 }

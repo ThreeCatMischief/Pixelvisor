@@ -13,6 +13,13 @@ constexpr uint32_t kRealtimeOutMs = 400;
 
 uint16_t target(const LightState& s) { return s.on ? s.brightness * 257 : 0; }
 
+// Linear from `from` to `to` over `ms`, at `t` ms.
+uint16_t ramp(uint16_t from, uint16_t to, uint32_t t, uint32_t ms) {
+  if (t >= ms) return to;
+  return static_cast<uint16_t>(from + (static_cast<int32_t>(to) - from) * static_cast<int32_t>(t) /
+                                          static_cast<int32_t>(ms));
+}
+
 Rgb16 widen(uint8_t r, uint8_t g, uint8_t b) {
   return {static_cast<uint16_t>(r * 257), static_cast<uint16_t>(g * 257), static_cast<uint16_t>(b * 257)};
 }
@@ -31,10 +38,13 @@ void Compositor::begin(uint16_t n, const LightState& s, uint32_t now) {
   rampStart_ = now;
   rampMs_ = kFadeInMs;
   brightness_ = 0;
+  revealMs_ = 0;
+  revealFrom_ = revealTo_ = reveal_ = 65535;
   renderSource(s, nullptr, shown_);
 }
 
-void Compositor::render(const LightState& s, uint16_t transitionMs, const uint8_t* realtime, uint32_t now) {
+void Compositor::render(const LightState& s, uint16_t transitionMs, Transition transition, const uint8_t* realtime,
+                        uint32_t now) {
   const bool live = realtime != nullptr;
 
   // The phase advances at the current speed, so a speed change continues without a jump.
@@ -65,6 +75,16 @@ void Compositor::render(const LightState& s, uint16_t transitionMs, const uint8_
     fadeMs_ = fadeMs;
   }
 
+  if (s.on != prev_.on) {
+    // A wipe starts from black when the strip is dark; any other change of `on` ends fully lit.
+    const bool wipe = transition == Transition::Wipe;
+    revealFrom_ = brightness_ > 0 ? reveal_ : wipe ? 0 : 65535;
+    revealTo_ = wipe && !s.on ? 0 : 65535;
+    revealStart_ = now;
+    revealMs_ = transitionMs;
+  }
+  reveal_ = ramp(revealFrom_, revealTo_, now - revealStart_, revealMs_);
+
   const uint16_t to = target(s);
   if (to != rampTo_) {
     rampFrom_ = brightness_;
@@ -72,10 +92,7 @@ void Compositor::render(const LightState& s, uint16_t transitionMs, const uint8_
     rampStart_ = now;
     rampMs_ = transitionMs;
   }
-  const uint32_t t = now - rampStart_;
-  brightness_ = t >= rampMs_ ? rampTo_
-                             : static_cast<uint16_t>(rampFrom_ + (static_cast<int32_t>(rampTo_) - rampFrom_) *
-                                                                     static_cast<int32_t>(t) / static_cast<int32_t>(rampMs_));
+  brightness_ = ramp(rampFrom_, rampTo_, now - rampStart_, rampMs_);
 
   renderSource(s, realtime, source_);
   const uint32_t f = now - fadeStart_;
@@ -88,6 +105,7 @@ void Compositor::render(const LightState& s, uint16_t transitionMs, const uint8_
   } else {
     memcpy(shown_, source_, n_ * sizeof(Rgb16));
   }
+  if (reveal_ < 65535) mask();
 
   prev_ = s;
   prevRealtime_ = live;
@@ -101,6 +119,18 @@ void Compositor::renderSource(const LightState& s, const uint8_t* realtime, Rgb1
     for (uint16_t i = 0; i < n_; i++) out[i] = c;
   } else {
     renderEffect(s, static_cast<uint16_t>(phase_ >> 16), out, n_);
+  }
+}
+
+// Lights each end inward over `reveal_` of its half. The LED at the edge is partly lit, so
+// the edge moves smoothly; with an odd count both edges reach the middle LED together.
+void Compositor::mask() {
+  const int32_t edge = static_cast<int32_t>(reveal_) * ((n_ + 1) / 2);  // 1/65535 LED from each end
+  for (uint16_t i = 0; i < n_; i++) {
+    const int32_t fromEnd = i < n_ - 1 - i ? i : n_ - 1 - i;
+    const int32_t c = edge - fromEnd * 65535;
+    const uint16_t w = c <= 0 ? 0 : c >= 65535 ? 65535 : static_cast<uint16_t>(c);
+    masked_[i] = {mix16(0, shown_[i].r, w), mix16(0, shown_[i].g, w), mix16(0, shown_[i].b, w)};
   }
 }
 

@@ -79,12 +79,19 @@ struct EffectPatch: Codable, Hashable, Sendable {
 
 /// PATCH /api/state body. Nil fields are left out.
 struct StatePatch: Codable, Hashable, Sendable {
+    /// How a change of `on` is shown: `wipe` lights the strip from both ends toward the
+    /// middle, and turns it off in reverse.
+    enum Transition: String, Codable, Hashable, Sendable {
+        case fade, wipe
+    }
+
     var on: Bool?
     var brightness: Int?
     var mode: Mode?
     var color: RGB?
     var effect: EffectPatch?
     var transitionMs: Int?
+    var transition: Transition?
 
     /// Later values win, field by field.
     mutating func merge(_ other: StatePatch) {
@@ -93,6 +100,7 @@ struct StatePatch: Codable, Hashable, Sendable {
         mode = other.mode ?? mode
         color = other.color ?? color
         transitionMs = other.transitionMs ?? transitionMs
+        transition = other.transition ?? transition
         if let e = other.effect {
             var merged = effect ?? EffectPatch()
             merged.id = e.id ?? merged.id

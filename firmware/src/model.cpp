@@ -9,6 +9,7 @@ namespace {
 
 const char* const kModes[] = {"solid", "effect"};
 const char* const kPowerOn[] = {"restore", "on", "off"};
+const char* const kTransitions[] = {"fade", "wipe"};
 const uint8_t kDataPins[] = {LB_DATA_PINS};
 
 bool fail(ApiError& err, const char* message, const char* field) {
@@ -125,6 +126,11 @@ bool patchState(JsonVariantConst body, LightState& state, StatePatchResult& resu
       return fail(err, "transition_ms must be an integer 0-10000", "transition_ms");
     }
     r.transitionMs = static_cast<uint16_t>(ms);
+  }
+  if (!(v = body["transition"]).isNull()) {
+    const int t = indexOf(kTransitions, v.as<const char*>());
+    if (t < 0) return fail(err, "transition must be \"fade\" or \"wipe\"", "transition");
+    r.transition = static_cast<Transition>(t);
   }
 
   r.changed = s != state;

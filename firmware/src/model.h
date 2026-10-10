@@ -84,10 +84,15 @@ struct ApiError {
   const char* field = nullptr;
 };
 
+// How a change of `on` is shown. Wipe lights the strip from both ends toward the middle,
+// and turns it off in reverse; other changes always fade.
+enum class Transition : uint8_t { Fade, Wipe };
+
 struct StatePatchResult {
   bool changed = false;  // a stored field has a new value
   bool hasMode = false;  // the patch contains `mode`, which ends realtime
   uint16_t transitionMs = 400;
+  Transition transition = Transition::Fade;
 };
 
 // Applies a PATCH /api/state body. All-or-nothing: on failure `state` is unchanged.

@@ -88,8 +88,11 @@ private struct DeviceTab: View {
                     Picker("Color order", selection: binding(\.colorOrder)) {
                         ForEach(DeviceConfig.colorOrders, id: \.self) { Text($0) }
                     }
+                    .help("Order in which the LED chip expects the three channels. If red shows as green, this is wrong. WS2812B strips are GRB.")
                     Toggle("First LED is at the right end", isOn: binding(\.reverse))
+                        .help("Turn on when the strip's data input is on the right side, so left and right on the screen match left and right on the strip.")
                     TextField("Current limit (mA, 0 = off)", value: binding(\.maxCurrentMa), format: .number.grouping(.never))
+                        .help("The device dims all LEDs so the estimated current stays below this. Set it to your power supply's rating minus about 300 mA. Lower is safer but caps brightness; 0 disables the limit.")
                     LabeledContent("White balance") {
                         HStack {
                             TextField("R", value: binding(\.whiteBalance.r), format: .number)
@@ -97,6 +100,7 @@ private struct DeviceTab: View {
                             TextField("B", value: binding(\.whiteBalance.b), format: .number)
                         }
                     }
+                    .help("Per-channel scale, 0-255, applied on the device to every color. Lower a channel to correct a tint, for example lower blue if white looks too cold. 255 for all three means no correction.")
                     Picker("After power loss", selection: binding(\.powerOn)) {
                         Text("Restore").tag("restore")
                         Text("On").tag("on")
@@ -197,9 +201,13 @@ private struct BrightnessTab: View {
                 ForEach(Displays.external(), id: \.self) { id in Text(Displays.name(id)).tag(Displays.uuid(id) ?? "") }
             }
             slider("Floor", value: follow.curve.floor, range: 0...0.5) { set(\.curve.floor, $0) }
+                .help("Strip brightness when the monitor is at 0 %, as a share of full. Higher keeps the strip visible at low monitor brightness; 0 lets it go dark.")
             slider("Ceiling", value: follow.curve.ceiling, range: 0.5...1) { set(\.curve.ceiling, $0) }
+                .help("Strip brightness when the monitor is at 100 %, as a share of full. Lower keeps the strip dimmer than the screen at the top end.")
             slider("Gamma", value: follow.curve.gamma, range: 0.5...3) { set(\.curve.gamma, $0) }
+                .help("Shape of the curve between floor and ceiling. 1 is linear. Above 1 the strip stays dim longer and rises late; below 1 it brightens early and flattens at the top.")
             slider("Poll every (s)", value: follow.pollSeconds, range: 1...10, step: 1) { set(\.pollSeconds, $0) }
+                .help("How often the monitor brightness is read. Lower reacts faster to brightness changes; higher sends fewer DDC requests to the monitor.")
             LabeledContent("Now") {
                 switch model.follower.state {
                 case let .following(monitor, output): Text("monitor \(monitor) % → strip \(output) / 255")
@@ -254,19 +262,31 @@ private struct MirrorTab: View {
                 Text("Zones").tag(MirrorStyle.zones)
                 Text("Average").tag(MirrorStyle.average)
             }
+            .help("Zones: each LED shows the screen area above it. Average: the whole strip shows one color, the mean of the entire screen.")
             slider("Band height (from the top)", value: mirror.bandHeight, range: 0.05...1) { set(\.bandHeight, $0) }
+                .help("How much of the screen, measured from the top edge, is sampled for Zones. Small values react only to what is near the strip; large values include more of the picture.")
             Stepper("First LED under the screen: \(mirror.ledStart)", value: Binding(get: { mirror.ledStart }, set: { set(\.ledStart, $0) }), in: 0...(leds - 1))
+                .help("First LED that sits under the screen's left edge. LEDs before it are outside the screen width.")
             Stepper("Last LED under the screen: \(mirror.ledEnd ?? leds - 1)",
                     value: Binding(get: { mirror.ledEnd ?? leds - 1 }, set: { set(\.ledEnd, $0 == leds - 1 ? nil : $0) }), in: mirror.ledStart...(leds - 1))
+                .help("Last LED that sits under the screen's right edge. LEDs after it are outside the screen width.")
             Picker("LEDs outside that range", selection: Binding(get: { mirror.outside }, set: { set(\.outside, $0) })) {
                 Text("Nearest edge color").tag(OutsideRange.extend)
                 Text("Off").tag(OutsideRange.off)
             }
+            .help("What LEDs beyond the screen edges show: the color of the nearest edge zone, or nothing.")
             slider("Saturation", value: mirror.saturation, range: 1...2) { set(\.saturation, $0) }
+                .help("Multiplies color saturation. 1 shows the screen colors as they are; higher makes the strip more vivid, which helps against washed-out mixed colors.")
             slider("Smoothing (ms)", value: mirror.smoothingMs, range: 0...500, step: 10) { set(\.smoothingMs, $0) }
+                .help("Time constant for fading between frames. 0 follows the screen instantly and can flicker; higher values remove flicker but make the strip lag behind fast changes.")
+            TextField("Average over last (s), 0 = off",
+                      value: Binding(get: { mirror.averageSeconds ?? 0 }, set: { set(\.averageSeconds, min(max($0, 0), 60)) }),
+                      format: .number.precision(.fractionLength(0...1)))
+                .help("The strip shows the mean of the last this-many seconds, so a sudden change fades in linearly over that time. Higher values calm cuts between dark and bright scenes; lower values follow the picture more closely. 0 turns it off.")
             Picker("Frame rate", selection: Binding(get: { mirror.fps }, set: { set(\.fps, $0) })) {
                 ForEach([15, 30, 60], id: \.self) { Text("\($0) fps").tag($0) }
             }
+            .help("How often the screen is sampled and sent to the strip. Higher is more responsive and uses more CPU and network.")
             if model.mirroring {
                 PreviewStrip(model: model, height: 16)
             } else {

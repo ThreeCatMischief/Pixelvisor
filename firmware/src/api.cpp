@@ -154,6 +154,7 @@ void handlePatchState() {
     ok = patchState(doc.as<JsonVariantConst>(), dev.state, result, err);
     if (ok) {
       dev.transitionMs = result.transitionMs;
+      dev.transition = result.transition;
       if (result.changed) {
         dev.rev++;
         dev.stateDirty = true;

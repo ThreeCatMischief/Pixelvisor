@@ -510,7 +510,7 @@ final class AppModel {
             sleepRecord = (false, wasMirroring, state?.rev)
             return
         }
-        let s = try? await call { try await $0.patch(StatePatch(on: false, transitionMs: 1000)) }
+        let s = try? await call { try await $0.patch(StatePatch(on: false, transitionMs: 1000, transition: .wipe)) }
         if let s { state = s }
         sleepRecord = (true, wasMirroring, s?.rev)
     }
@@ -533,7 +533,7 @@ final class AppModel {
         }
         adopt(current)
         guard record.wasOn, current.rev == record.rev else { return }
-        if let s = try? await call({ try await $0.patch(StatePatch(on: true)) }) { adopt(s) }
+        if let s = try? await call({ try await $0.patch(StatePatch(on: true, transitionMs: 1000, transition: .wipe)) }) { adopt(s) }
         if record.wasMirroring { startMirror() }
     }
 

@@ -113,11 +113,12 @@ Static and diagnostic information.
 
 ### `PATCH /api/state`
 
-Partial update. Any subset of the writable fields, plus one request-only field:
+Partial update. Any subset of the writable fields, plus request-only fields:
 
 | Field | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `transition_ms` | 0–10000 | 400 | Crossfade duration for this change. Not stored. |
+| `transition` | `"fade"` \| `"wipe"` | `"fade"` | How a change of `on` is shown. `wipe`: turning on lights the strip from both ends toward the middle while brightness ramps up from 0; turning off is the reverse. Takes `transition_ms`. Other changes in the same patch fade. Not stored. |
 
 ```json
 { "brightness": 90, "transition_ms": 150 }

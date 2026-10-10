@@ -22,7 +22,16 @@ struct MirrorSettings: Codable, Hashable, Sendable {
     var outside = OutsideRange.extend
     var saturation = 1.3
     var smoothingMs = 120.0   // time constant; 0 = off
+    var averageSeconds: Double?  // moving-average window; nil or 0 = off. Optional so older saved settings decode.
+    var maxBrightness: Double?   // strip value for a white screen; nil = 1
+    var brightnessSpan: Double?  // max minus the value for a black screen; nil = 1
     var fps = 30
+
+    /// HSV value 0...1 of each zone is mapped linearly onto this range.
+    var brightnessRange: ClosedRange<Double> {
+        let hi = min(max(maxBrightness ?? 1, 0), 1)
+        return max(hi - max(brightnessSpan ?? 1, 0), 0)...hi
+    }
 }
 
 /// sRGB color, each channel 0...1.
@@ -32,9 +41,9 @@ enum ZoneReducer {
     private static let linear: [Double] = (0..<256).map { ColorMath.toLinear(Double($0) / 255) }
 
     /// Splits a BGRA buffer into `zones` equal columns, averages each in linear light, and
-    /// boosts saturation (`s × saturation`, clamped).
+    /// boosts saturation (`s × saturation`, clamped) and maps the value 0...1 onto `brightness`.
     static func reduce(_ pixels: UnsafeRawBufferPointer, width: Int, height: Int, bytesPerRow: Int,
-                       zones: Int, saturation: Double) -> [Color3] {
+                       zones: Int, saturation: Double, brightness: ClosedRange<Double> = 0...1) -> [Color3] {
         guard zones > 0, width > 0, height > 0 else { return [] }
         let bytes = pixels.bindMemory(to: UInt8.self)
         return (0..<zones).map { zone in
@@ -49,13 +58,14 @@ enum ZoneReducer {
             }
             let mean = sum / Double((min(x1, width) - x0) * height)
             let srgb = Color3(ColorMath.toSRGB(mean.x), ColorMath.toSRGB(mean.y), ColorMath.toSRGB(mean.z))
-            return boost(srgb, saturation)
+            return boost(srgb, saturation, brightness: brightness)
         }
     }
 
-    static func boost(_ c: Color3, _ saturation: Double) -> Color3 {
+    /// Black has no hue, so it becomes neutral white at the lower bound.
+    static func boost(_ c: Color3, _ saturation: Double, brightness: ClosedRange<Double> = 0...1) -> Color3 {
         let (h, s, v) = ColorMath.rgbToHSV(r: c.x, g: c.y, b: c.z)
-        let (r, g, b) = ColorMath.hsvToRGB(h: h, s: min(s * saturation, 1), v: v)
+        let (r, g, b) = ColorMath.hsvToRGB(h: h, s: min(s * saturation, 1), v: brightness.lowerBound + (brightness.upperBound - brightness.lowerBound) * v)
         return Color3(r, g, b)
     }
 }
@@ -96,6 +106,48 @@ struct Smoother {
     }
 }
 
+/// Mean of the frames from the last `window` seconds, each weighted by its frame interval.
+/// A sudden change ramps in linearly and is fully reached after `window` seconds.
+struct MovingAverage {
+    var window: Double  // seconds; 0 = off
+    private var frames: [(time: Double, dt: Double, colors: [Color3])] = []
+    private var sum: [Color3] = []
+    private var weight = 0.0
+    private var now = 0.0
+
+    init(window: Double) {
+        self.window = window
+    }
+
+    mutating func apply(_ frame: [Color3], dt: Double) -> [Color3] {
+        guard window > 0 else {
+            reset()
+            return frame
+        }
+        if sum.count != frame.count { reset() }
+        if sum.isEmpty { sum = Array(repeating: .zero, count: frame.count) }
+        let dt = max(dt, 0)
+        now += dt
+        frames.append((now, dt, frame))
+        for i in sum.indices { sum[i] += frame[i] * dt }
+        weight += dt
+        while frames.count > 1, frames[0].time <= now - window + 1e-9 {
+            let old = frames.removeFirst()
+            for i in sum.indices { sum[i] -= old.colors[i] * old.dt }
+            weight -= old.dt
+        }
+        guard weight > 0 else { return frame }
+        return sum.map { $0 / weight }
+    }
+
+    private mutating func reset() {
+        frames = []
+        sum = []
+        weight = 0
+        now = 0
+    }
+}
+
 enum MirrorError: LocalizedError {
     case permissionDenied, displayNotFound
 
@@ -125,6 +177,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
     private var ledCount = 0
     private var target: [Color3] = []
     private var smoother = Smoother(tau: 0)
+    private var average = MovingAverage(window: 0)
     private var lastTick = ContinuousClock.now
     private var lastBytes: [UInt8] = []
     private var lastSentAt: ContinuousClock.Instant?
@@ -161,6 +214,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
             self.ledCount = ledCount
             self.target = []
             self.smoother = Smoother(tau: settings.smoothingMs / 1000)
+            self.average = MovingAverage(window: settings.averageSeconds ?? 0)
             self.sender = DDPSender(host: device.host, port: ddpPort)
             // After this Mac ended its own stream, the device ignores it until it pauses 1 s.
             self.resumeAt = self.lastSentAt.map { $0 + .seconds(1.1) }
@@ -182,6 +236,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
             self.settings = settings
             self.ledCount = ledCount
             self.smoother.tau = settings.smoothingMs / 1000
+            self.average.window = settings.averageSeconds ?? 0
             return (stream, display)
         }
         guard let (stream, display) = current else { return }
@@ -244,7 +299,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
         let mapped = settings.style == .average
             ? LEDMapping.map(target, ledCount: ledCount, start: 0, end: ledCount - 1, outside: .extend)
             : LEDMapping.map(target, ledCount: ledCount, start: settings.ledStart, end: end, outside: settings.outside)
-        let smoothed = smoother.apply(mapped, dt: dt)
+        let smoothed = smoother.apply(average.apply(mapped, dt: dt), dt: dt)
         var bytes = [UInt8]()
         bytes.reserveCapacity(smoothed.count * 3)
         for c in smoothed {
@@ -285,7 +340,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
         let zones = settings.style == .average ? 1 : max(end - settings.ledStart + 1, 1)
         target = ZoneReducer.reduce(UnsafeRawBufferPointer(start: base, count: bytesPerRow * height),
                                     width: width, height: height, bytesPerRow: bytesPerRow,
-                                    zones: zones, saturation: settings.saturation)
+                                    zones: zones, saturation: settings.saturation, brightness: settings.brightnessRange)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {

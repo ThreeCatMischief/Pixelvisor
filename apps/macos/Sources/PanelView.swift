@@ -182,6 +182,25 @@ struct PanelView: View {
                 Text(mirror.bandHeight.formatted(.percent.precision(.fractionLength(0)))).monospacedDigit().frame(width: 36, alignment: .trailing)
             }
         }
+        let range = mirror.brightnessRange
+        labeled("Max") {
+            Slider(value: Binding(get: { range.upperBound }, set: {
+                var m = mirror
+                m.maxBrightness = $0
+                model.mirrorSettingsChanged(m)
+            }), in: 0...1)
+            Text(range.upperBound.formatted(.percent.precision(.fractionLength(0)))).monospacedDigit().frame(width: 36, alignment: .trailing)
+        }
+        .help("Strip brightness for a white screen, as a share of the master brightness.")
+        labeled("Range") {
+            Slider(value: Binding(get: { mirror.brightnessSpan ?? 1 }, set: {
+                var m = mirror
+                m.brightnessSpan = $0
+                model.mirrorSettingsChanged(m)
+            }), in: 0...1)
+            Text((mirror.brightnessSpan ?? 1).formatted(.percent.precision(.fractionLength(0)))).monospacedDigit().frame(width: 36, alignment: .trailing)
+        }
+        .help("How far the strip dims from a white to a black screen. A black screen shows white at Max minus Range instead of turning the strip off; 0 keeps the strip at Max regardless of the picture.")
         if model.mirroring {
             PreviewStrip(model: model)
         } else if let message = model.mirrorMessage {
