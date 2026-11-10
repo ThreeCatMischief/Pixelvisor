@@ -20,12 +20,11 @@ bool parseDdp(const uint8_t* buf, size_t len, DdpPacket& out) {
   if (flags >> 6 != 1) return false;  // version 1
   const uint8_t type = buf[2];
   if (type != 0x00 && type != 0x01 && type != 0x0B) return false;
-  const uint8_t destination = buf[3];
-  if (destination != 1 && destination != 255) return false;
   const size_t header = (flags & kFlagTimecode) ? 14 : 10;  // timecode bytes are skipped
   if (len < header) return false;
 
   const uint16_t length = static_cast<uint16_t>(buf[8] << 8 | buf[9]);
+  out.destination = buf[3];
   out.push = (flags & kFlagPush) != 0;
   out.offset = be32(buf + 4);
   out.data = buf + header;
@@ -33,11 +32,15 @@ bool parseDdp(const uint8_t* buf, size_t len, DdpPacket& out) {
   return true;
 }
 
-void Realtime::begin(uint16_t ledCount) { bytes_ = ledCount * 3; }
+void Realtime::begin(uint16_t ledCount, uint8_t destination) {
+  bytes_ = ledCount * 3;
+  destination_ = destination;
+}
 
 void Realtime::receive(uint32_t sourceIp, const uint8_t* buf, size_t len, bool on, uint32_t now) {
   DdpPacket p;
   if (!parseDdp(buf, len, p)) return;
+  if (p.destination != destination_ && p.destination != 255) return;
   if (blocked_) {
     if (static_cast<int32_t>(now - blockedUntil_) >= 0) {
       blocked_ = 0;

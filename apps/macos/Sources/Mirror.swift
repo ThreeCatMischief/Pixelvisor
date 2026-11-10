@@ -190,7 +190,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
         CGRequestScreenCaptureAccess()
     }
 
-    func start(settings: MirrorSettings, ledCount: Int, device: Endpoint, ddpPort: Int) async throws {
+    func start(settings: MirrorSettings, ledCount: Int, device: Endpoint, ddpPort: Int, destination: UInt8 = 1) async throws {
         stop()
         let content: SCShareableContent
         do {
@@ -215,7 +215,7 @@ final class MirrorEngine: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked
             self.target = []
             self.smoother = Smoother(tau: settings.smoothingMs / 1000)
             self.average = MovingAverage(window: settings.averageSeconds ?? 0)
-            self.sender = DDPSender(host: device.host, port: ddpPort)
+            self.sender = DDPSender(host: device.host, port: ddpPort, destination: destination)
             // After this Mac ended its own stream, the device ignores it until it pauses 1 s.
             self.resumeAt = self.lastSentAt.map { $0 + .seconds(1.1) }
             self.lastTick = .now

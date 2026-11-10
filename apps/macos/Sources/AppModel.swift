@@ -6,8 +6,6 @@ import os
 
 @MainActor @Observable
 final class AppModel {
-    static let shared = AppModel()
-
     enum Connection: Equatable {
         case searching   // nothing found yet
         case connecting
@@ -26,8 +24,9 @@ final class AppModel {
         case on, off, mirroring, unreachable
     }
 
-    var settings = AppSettings.load() { didSet { settings.save() } }
-    let browser = DeviceBrowser()
+    /// Position of the strip on the device: 0 Monitor, 1 Skadis. It selects the API paths
+    /// and the DDP output.
+    let index: Int
     let follower = BrightnessFollower()
 
     private(set) var connection = Connection.searching
@@ -46,6 +45,25 @@ final class AppModel {
     var hue = 0.07
     var saturation = 0.65
 
+    init(index: Int) {
+        self.index = index
+    }
+
+    private var hub: Hub { Hub.shared }
+    var browser: DeviceBrowser { hub.browser }
+
+    /// Settings shared by all strips (device choice, sleep behaviour).
+    var settings: AppSettings {
+        get { hub.settings }
+        set { hub.settings = newValue }
+    }
+
+    /// Settings of this strip.
+    var mine: StripSettings {
+        get { settings.strips[index] }
+        set { settings.strips[index] = newValue }
+    }
+
     @ObservationIgnored private var api: PixelvisorAPI?
     @ObservationIgnored private lazy var throttler = PatchThrottler { [weak self] patch in await self?.send(patch) }
     @ObservationIgnored private let mirror = MirrorEngine()
@@ -62,24 +80,21 @@ final class AppModel {
     // MARK: - Lifecycle
 
     func start() {
-        browser.start()
-        power = PowerEvents { [weak self] event in self?.handle(event) }
         follower.apply = { [weak self] brightness, ms in self?.submit(StatePatch(brightness: brightness, transitionMs: ms)) }
-        mirror.onPreview = { colors in Task { @MainActor in AppModel.shared.mirrorPreview = colors } }
-        mirror.onStopped = { reason in Task { @MainActor in AppModel.shared.mirrorStopped("Mirroring stopped: \(reason)") } }
-        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated {
-                AppModel.shared.follower.displaysChanged()
-                AppModel.shared.checkStripDisplay()
-            }
-        }
+        mirror.onPreview = { [weak self] colors in Task { @MainActor in self?.mirrorPreview = colors } }
+        mirror.onStopped = { [weak self] reason in Task { @MainActor in self?.mirrorStopped("Mirroring stopped: \(reason)") } }
         connect()
         checkStripDisplay()
     }
 
+    func displaysChanged() {
+        follower.displaysChanged()
+        checkStripDisplay()
+    }
+
     var deviceSettings: DeviceSettings {
-        get { settings[device: info?.id] }
-        set { settings[device: info?.id] = newValue }
+        get { settings[device: info?.id, strip: index] }
+        set { settings[device: info?.id, strip: index] = newValue }
     }
 
     var iconState: IconState {
@@ -88,7 +103,14 @@ final class AppModel {
         return state.on ? .on : .off
     }
 
-    var deviceName: String { info?.name ?? "Pixelvisor" }
+    var deviceName: String { info?.strip(index)?.name ?? Hub.defaultNames[index] }
+
+    /// False when the strip is switched off in its config (applies after a reboot). Such a
+    /// strip drives no pin, so the app leaves it alone and hides it.
+    var isEnabled: Bool { info?.strip(index)?.isEnabled ?? true }
+
+    /// LEDs on this strip.
+    var ledCount: Int { info?.strip(index)?.ledCount ?? info?.ledCount ?? 0 }
 
     // MARK: - Connection
 
@@ -125,7 +147,7 @@ final class AppModel {
     }
 
     private func attach(_ endpoint: Endpoint) async throws {
-        let api = PixelvisorAPI(endpoint: endpoint)
+        let api = PixelvisorAPI(endpoint: endpoint, strip: index)
         let info = try await api.info()
         let state = try await api.state()
         let effects = try await api.effects()
@@ -137,7 +159,7 @@ final class AppModel {
         adopt(state)
         connection = .connected
         follower.settings = deviceSettings.follow
-        if settings.brightnessSource == .followMonitor { follower.start() }
+        if isEnabled && mine.brightnessSource == .followMonitor { follower.start() }
         Self.log.info("connected to \(info.name, privacy: .public) at \(endpoint, privacy: .public)")
     }
 
@@ -149,7 +171,7 @@ final class AppModel {
             return try await request(api)
         } catch PixelvisorError.unreachable {
             if let endpoint = await locate() {
-                let retry = PixelvisorAPI(endpoint: endpoint)
+                let retry = PixelvisorAPI(endpoint: endpoint, strip: index)
                 if let result = try? await request(retry) {
                     self.api = retry
                     self.endpoint = endpoint
@@ -165,17 +187,22 @@ final class AppModel {
     func useDevice(id: String) {
         settings.manualEndpoint = nil
         settings.selectedDeviceID = id
-        reconnect()
+        hub.reconnectAll()
     }
 
     func useManualEndpoint(_ text: String) -> Bool {
         guard Endpoint(text) != nil else { return false }
         settings.manualEndpoint = text
-        reconnect()
+        hub.reconnectAll()
         return true
     }
 
-    private func reconnect() {
+    func clearManualEndpoint() {
+        settings.manualEndpoint = nil
+        hub.reconnectAll()
+    }
+
+    func reconnect() {
         stopMirror()
         follower.stop()
         info = nil
@@ -193,7 +220,7 @@ final class AppModel {
         guard !mirroring else { return }
         if s.mode == .effect {
             colorSource = .effect
-        } else if settings.lastColorSource == .white && s.color == ColorMath.kelvin(settings.whiteKelvin) {
+        } else if mine.lastColorSource == .white && s.color == ColorMath.kelvin(mine.whiteKelvin) {
             colorSource = .white
         } else {
             colorSource = .color
@@ -259,12 +286,12 @@ final class AppModel {
 
     /// The slider: brightness with Manual, the follow level with Follow monitor.
     var brightnessLevel: Double {
-        if settings.brightnessSource == .followMonitor { return deviceSettings.follow.level }
+        if mine.brightnessSource == .followMonitor { return deviceSettings.follow.level }
         return Double(state?.brightness ?? 0) / 255
     }
 
     func setBrightnessLevel(_ level: Double) {
-        if settings.brightnessSource == .followMonitor {
+        if mine.brightnessSource == .followMonitor {
             deviceSettings.follow.level = level
             follower.settings = deviceSettings.follow
             follower.levelChanged()
@@ -274,7 +301,7 @@ final class AppModel {
     }
 
     func setBrightnessSource(_ source: BrightnessSource) {
-        settings.brightnessSource = source
+        mine.brightnessSource = source
         if source == .followMonitor {
             follower.settings = deviceSettings.follow
             follower.start()
@@ -295,13 +322,13 @@ final class AppModel {
         colorSource = source
         switch source {
         case .color:
-            settings.lastColorSource = .color
+            mine.lastColorSource = .color
             submit(StatePatch(mode: .solid, color: ColorMath.color(hue: hue, saturation: saturation)))
         case .white:
-            settings.lastColorSource = .white
-            submit(StatePatch(mode: .solid, color: ColorMath.kelvin(settings.whiteKelvin)))
+            mine.lastColorSource = .white
+            submit(StatePatch(mode: .solid, color: ColorMath.kelvin(mine.whiteKelvin)))
         case .effect:
-            settings.lastColorSource = .effect
+            mine.lastColorSource = .effect
             submit(StatePatch(mode: .effect))
         case .mirror:
             startMirror()
@@ -315,7 +342,7 @@ final class AppModel {
     }
 
     func setKelvin(_ kelvin: Int) {
-        settings.whiteKelvin = kelvin
+        mine.whiteKelvin = kelvin
         submit(StatePatch(mode: .solid, color: ColorMath.kelvin(kelvin), transitionMs: 150))
     }
 
@@ -332,27 +359,27 @@ final class AppModel {
     // MARK: - Presets
 
     func savePreset() {
-        guard let state, settings.presets.count < AppSettings.maxPresets else { return }
+        guard let state, mine.presets.count < AppSettings.maxPresets else { return }
         var preset = Preset(name: "", source: colorSource)
         fill(&preset, from: state)
-        settings.presets.append(preset)
+        mine.presets.append(preset)
     }
 
     func updatePreset(_ id: UUID) {
-        guard let state, let i = settings.presets.firstIndex(where: { $0.id == id }) else { return }
-        let name = settings.presets[i].name
-        settings.presets[i] = Preset(id: id, name: "", source: colorSource)
-        fill(&settings.presets[i], from: state)
-        settings.presets[i].name = name
+        guard let state, let i = mine.presets.firstIndex(where: { $0.id == id }) else { return }
+        let name = mine.presets[i].name
+        mine.presets[i] = Preset(id: id, name: "", source: colorSource)
+        fill(&mine.presets[i], from: state)
+        mine.presets[i].name = name
     }
 
     func renamePreset(_ id: UUID, to name: String) {
-        guard let i = settings.presets.firstIndex(where: { $0.id == id }), !name.isEmpty else { return }
-        settings.presets[i].name = name
+        guard let i = mine.presets.firstIndex(where: { $0.id == id }), !name.isEmpty else { return }
+        mine.presets[i].name = name
     }
 
     func deletePreset(_ id: UUID) {
-        settings.presets.removeAll { $0.id == id }
+        mine.presets.removeAll { $0.id == id }
     }
 
     private func fill(_ preset: inout Preset, from state: LightState) {
@@ -361,8 +388,8 @@ final class AppModel {
             preset.color = state.color
             preset.name = "Color"
         case .white:
-            preset.kelvin = settings.whiteKelvin
-            preset.name = "\(settings.whiteKelvin) K"
+            preset.kelvin = mine.whiteKelvin
+            preset.name = "\(mine.whiteKelvin) K"
         case .effect:
             preset.effect = state.effect
             preset.color = state.color
@@ -378,18 +405,18 @@ final class AppModel {
         case .color:
             guard let color = preset.color else { return }
             colorSource = .color
-            settings.lastColorSource = .color
+            mine.lastColorSource = .color
             (hue, saturation) = ColorMath.hueSaturation(color)
             submit(StatePatch(mode: .solid, color: color))
         case .white:
             colorSource = .white
-            settings.lastColorSource = .white
-            settings.whiteKelvin = preset.kelvin ?? settings.whiteKelvin
-            submit(StatePatch(mode: .solid, color: ColorMath.kelvin(settings.whiteKelvin)))
+            mine.lastColorSource = .white
+            mine.whiteKelvin = preset.kelvin ?? mine.whiteKelvin
+            submit(StatePatch(mode: .solid, color: ColorMath.kelvin(mine.whiteKelvin)))
         case .effect:
             guard let e = preset.effect else { return }
             colorSource = .effect
-            settings.lastColorSource = .effect
+            mine.lastColorSource = .effect
             submit(StatePatch(mode: .effect, color: preset.color, effect: EffectPatch(id: e.id, speed: e.speed, color2: e.color2)))
         case .mirror:
             select(.mirror)
@@ -408,16 +435,18 @@ final class AppModel {
     // MARK: - Mirror
 
     func startMirror() {
-        guard let endpoint, let info else { return }
+        guard isEnabled, let endpoint, let info else { return }
         colorSource = .mirror
         mirrorMessage = nil
         if state?.on == false { submit(StatePatch(on: true)) }
         if !MirrorEngine.hasPermission { MirrorEngine.requestPermission() }
         let ddpPort = browser.devices.first { $0.id == info.id }?.txt["ddp"].flatMap(Int.init) ?? info.ddp.port
+        let destination = UInt8(index + 1)
+        let ledCount = ledCount
         let settings = deviceSettings.mirror
         Task {
             do {
-                try await mirror.start(settings: settings, ledCount: info.ledCount, device: endpoint, ddpPort: ddpPort)
+                try await mirror.start(settings: settings, ledCount: ledCount, device: endpoint, ddpPort: ddpPort, destination: destination)
                 mirroring = true
                 watchMirror()
             } catch {
@@ -439,8 +468,9 @@ final class AppModel {
         let previous = deviceSettings.mirror
         deviceSettings.mirror = settings
         guard mirroring else { return }
-        if settings.displayUUID == previous.displayUUID && settings.fps == previous.fps, let info {
-            Task { await mirror.update(settings: settings, ledCount: info.ledCount) }
+        if settings.displayUUID == previous.displayUUID && settings.fps == previous.fps {
+            let ledCount = ledCount
+            Task { await mirror.update(settings: settings, ledCount: ledCount) }
         } else {
             startMirror()
         }
@@ -491,7 +521,7 @@ final class AppModel {
         handle(online ? .displayOn : .displayOff)
     }
 
-    private func handle(_ event: PowerEvent) {
+    func handle(_ event: PowerEvent) {
         sleep.offOnSleep = settings.offOnSleep
         sleep.offOnLock = settings.offOnLock
         switch sleep.handle(event) {
@@ -583,7 +613,7 @@ final class AppModel {
             do {
                 let image = try Data(contentsOf: url)
                 try await api.uploadFirmware(image) { progress in
-                    Task { @MainActor in AppModel.shared.upload = .uploading(progress) }
+                    Task { @MainActor in self.upload = .uploading(progress) }
                 }
                 upload = .restarting
                 try? await Task.sleep(for: .seconds(3))

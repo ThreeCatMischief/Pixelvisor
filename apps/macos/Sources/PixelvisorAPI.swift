@@ -47,10 +47,13 @@ struct PixelvisorAPI: Sendable {
     static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "pixelvisor", category: "api")
 
     let endpoint: Endpoint
+    /// Strip 0 uses the paths of the single-strip API; the others live under /api/strips/<n>.
+    let strip: Int
     private let session: URLSession
 
-    init(endpoint: Endpoint) {
+    init(endpoint: Endpoint, strip: Int = 0) {
         self.endpoint = endpoint
+        self.strip = strip
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 2
         config.waitsForConnectivity = false
@@ -63,18 +66,20 @@ struct PixelvisorAPI: Sendable {
         return info
     }
 
-    func state() async throws -> LightState { try await request("GET", "/api/state") }
-    func patch(_ patch: StatePatch) async throws -> LightState { try await request("PATCH", "/api/state", body: patch) }
+    private var stripPath: String { strip == 0 ? "/api" : "/api/strips/\(strip)" }
+
+    func state() async throws -> LightState { try await request("GET", "\(stripPath)/state") }
+    func patch(_ patch: StatePatch) async throws -> LightState { try await request("PATCH", "\(stripPath)/state", body: patch) }
     func effects() async throws -> [EffectInfo] { try await request("GET", "/api/effects") }
-    func config() async throws -> DeviceConfig { try await request("GET", "/api/config") }
-    func patchConfig(_ patch: ConfigPatch) async throws -> DeviceConfig { try await request("PATCH", "/api/config", body: patch) }
+    func config() async throws -> DeviceConfig { try await request("GET", "\(stripPath)/config") }
+    func patchConfig(_ patch: ConfigPatch) async throws -> DeviceConfig { try await request("PATCH", "\(stripPath)/config", body: patch) }
 
     func reboot() async throws {
         let _: OkBody = try await request("POST", "/api/reboot")
     }
 
     func identify() async throws {
-        let _: OkBody = try await request("POST", "/api/identify")
+        let _: OkBody = try await request("POST", "\(stripPath)/identify")
     }
 
     /// Clears the stored WiFi credentials; the device restarts into its setup portal.

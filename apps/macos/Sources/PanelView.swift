@@ -2,7 +2,30 @@
 
 import SwiftUI
 
+/// The dropdown: a tab per strip, with the controls of the selected one below.
 struct PanelView: View {
+    let hub: Hub
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if hub.visible.count > 1 {
+                Picker("Strip", selection: Binding(get: { hub.current }, set: { hub.selected = $0 })) {
+                    ForEach(hub.visible, id: \.index) { Text($0.deviceName).tag($0.index) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            StripPanel(model: hub.model).id(hub.current)
+        }
+        .padding(14)
+        .frame(width: 300)
+        .onAppear { hub.panelOpened() }
+        .onDisappear { hub.panelClosed() }
+    }
+}
+
+/// Controls of one strip.
+private struct StripPanel: View {
     let model: AppModel
     @Environment(\.openSettings) private var openSettings
     @State private var renaming: Preset?
@@ -37,10 +60,6 @@ struct PanelView: View {
             }
             .buttonStyle(.borderless)
         }
-        .padding(14)
-        .frame(width: 300)
-        .onAppear { model.panelOpened() }
-        .onDisappear { model.panelClosed() }
         .alert("Rename preset", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $newName)
             Button("Rename") { if let renaming { model.renamePreset(renaming.id, to: newName) } }
@@ -57,7 +76,6 @@ struct PanelView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text(model.deviceName).font(.headline)
             Circle().fill(model.connection == .connected ? Color.green : Color.secondary).frame(width: 7, height: 7)
             Text(statusText).font(.caption).foregroundStyle(.secondary)
             Spacer()
@@ -86,13 +104,13 @@ struct PanelView: View {
                 Text("\(Int((model.brightnessLevel * 100).rounded())) %").monospacedDigit().frame(width: 40, alignment: .trailing)
             }
             if model.follower.isSupported {
-                Picker("Brightness source", selection: Binding(get: { model.settings.brightnessSource }, set: { model.setBrightnessSource($0) })) {
+                Picker("Brightness source", selection: Binding(get: { model.mine.brightnessSource }, set: { model.setBrightnessSource($0) })) {
                     Text("Manual").tag(BrightnessSource.manual)
                     Text("Follow monitor").tag(BrightnessSource.followMonitor)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                if model.settings.brightnessSource == .followMonitor {
+                if model.mine.brightnessSource == .followMonitor {
                     Text(followText).font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -116,10 +134,10 @@ struct PanelView: View {
         case .white:
             VStack(alignment: .leading, spacing: 4) {
                 GradientSlider(colors: [2000, 3000, 4000, 5000, 6500].map { Color(ColorMath.kelvin($0)) },
-                               value: Double(model.settings.whiteKelvin - 2000) / 4500) {
+                               value: Double(model.mine.whiteKelvin - 2000) / 4500) {
                     model.setKelvin(2000 + Int(($0 * 4500 / 100).rounded()) * 100)
                 }
-                Text("\(model.settings.whiteKelvin) K").font(.caption).foregroundStyle(.secondary)
+                Text("\(model.mine.whiteKelvin) K").font(.caption).foregroundStyle(.secondary)
             }
         case .effect:
             effectControls(state)
@@ -218,7 +236,7 @@ struct PanelView: View {
 
     private var presets: some View {
         HStack(spacing: 8) {
-            ForEach(model.settings.presets) { preset in
+            ForEach(model.mine.presets) { preset in
                 Button { model.apply(preset) } label: {
                     Circle().fill(Color(model.swatch(preset))).frame(width: 18, height: 18)
                         .overlay(Circle().strokeBorder(.secondary.opacity(0.4)))
@@ -235,7 +253,7 @@ struct PanelView: View {
                 }
             }
             Spacer()
-            if model.settings.presets.count < AppSettings.maxPresets {
+            if model.mine.presets.count < AppSettings.maxPresets {
                 Button("+ Save preset") { model.savePreset() }.buttonStyle(.borderless)
             }
         }

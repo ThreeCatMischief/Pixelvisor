@@ -4,9 +4,10 @@ import Foundation
 import Network
 
 enum DDP {
-    /// One frame in one packet: version 1 with PUSH, RGB 8 bit, default output, offset 0.
-    static func packet(sequence: UInt8, rgb: [UInt8]) -> Data {
-        var data = Data([0x41, sequence & 0x0F, 0x0B, 0x01, 0, 0, 0, 0, UInt8(rgb.count >> 8), UInt8(rgb.count & 0xFF)])
+    /// One frame in one packet: version 1 with PUSH, RGB 8 bit, offset 0.
+    /// `destination` is the output ID: strip index + 1.
+    static func packet(sequence: UInt8, rgb: [UInt8], destination: UInt8 = 1) -> Data {
+        var data = Data([0x41, sequence & 0x0F, 0x0B, destination, 0, 0, 0, 0, UInt8(rgb.count >> 8), UInt8(rgb.count & 0xFF)])
         data.append(contentsOf: rgb)
         return data
     }
@@ -19,15 +20,17 @@ enum DDP {
 final class DDPSender {
     private let connection: NWConnection
     private var sequence: UInt8 = 0
+    private let destination: UInt8
 
-    init(host: String, port: Int) {
+    init(host: String, port: Int, destination: UInt8 = 1) {
+        self.destination = destination
         connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(integerLiteral: UInt16(port)), using: .udp)
         connection.start(queue: .global(qos: .userInteractive))
     }
 
     func send(_ rgb: [UInt8]) {
         sequence = DDP.next(sequence)
-        connection.send(content: DDP.packet(sequence: sequence, rgb: rgb), completion: .idempotent)
+        connection.send(content: DDP.packet(sequence: sequence, rgb: rgb, destination: destination), completion: .idempotent)
     }
 
     func close() {

@@ -90,15 +90,16 @@ bool readBody(JsonDocument& doc) {
   return true;
 }
 
-void sendState() {
+void sendState(int i) {
   LightState s;
   uint32_t rev;
   uint32_t source = 0;
   {
     Lock lock;
-    s = dev.state;
-    rev = dev.rev;
-    if (dev.realtimeActive) source = dev.realtimeSource;
+    const Channel& ch = dev.ch[i];
+    s = ch.state;
+    rev = ch.rev;
+    if (ch.realtimeActive) source = ch.realtimeSource;
   }
   const String ip = source ? IPAddress(source).toString() : String();
   JsonDocument doc;
@@ -106,14 +107,15 @@ void sendState() {
   sendJson(200, doc);
 }
 
-void sendConfig() {
+void sendConfig(int i) {
   DeviceConfig c;
   {
     Lock lock;
-    c = dev.config;
+    c = dev.ch[i].config;
   }
   JsonDocument doc;
-  writeConfig(doc.to<JsonObject>(), c, rebootRequired(c, dev.running));
+  writeConfig(doc.to<JsonObject>(), c, rebootRequired(c, dev.ch[i].running));
+  if (i > 0) doc.remove("hostname");  // the hostname belongs to the device, which is strip 0
   sendJson(200, doc);
 }
 
@@ -123,27 +125,40 @@ void handleInfo() {
   DeviceConfig c;
   {
     Lock lock;
-    c = dev.config;
+    c = dev.ch[0].config;
   }
   JsonDocument doc;
   doc["api"] = kApiVersion;
   doc["fw"] = LB_FW_VERSION;
   doc["id"] = dev.id;
   doc["name"] = c.name;
-  doc["hostname"] = dev.running.hostname;
+  doc["hostname"] = dev.ch[0].running.hostname;
   doc["board"] = CONFIG_IDF_TARGET;
-  doc["led_count"] = dev.running.ledCount;
+  doc["led_count"] = dev.ch[0].running.ledCount;
+  JsonArray strips = doc["strips"].to<JsonArray>();
+  {
+    Lock lock;
+    for (int i = 0; i < kStrips; i++) {
+      JsonObject strip = strips.add<JsonObject>();
+      strip["index"] = i;
+      strip["name"] = dev.ch[i].config.name;
+      strip["enabled"] = dev.ch[i].running.enabled;
+      strip["led_count"] = dev.ch[i].running.ledCount;
+      strip["data_pin"] = dev.ch[i].running.dataPin;
+    }
+  }
   doc["ip"] = WiFi.localIP().toString();
   doc["rssi"] = WiFi.RSSI();
   doc["uptime_s"] = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
   doc["free_heap"] = ESP.getFreeHeap();
+  writeDataPins(doc["data_pins"].to<JsonArray>());
   JsonObject ddp = doc["ddp"].to<JsonObject>();
   ddp["port"] = kDdpPort;
   ddp["max_leds"] = kMaxLeds;
   sendJson(200, doc);
 }
 
-void handlePatchState() {
+void handlePatchState(int i) {
   JsonDocument doc;
   if (!readBody(doc)) return;
   ApiError err;
@@ -151,18 +166,19 @@ void handlePatchState() {
   bool ok;
   {
     Lock lock;
-    ok = patchState(doc.as<JsonVariantConst>(), dev.state, result, err);
+    Channel& ch = dev.ch[i];
+    ok = patchState(doc.as<JsonVariantConst>(), ch.state, result, err);
     if (ok) {
-      dev.transitionMs = result.transitionMs;
-      dev.transition = result.transition;
+      ch.transitionMs = result.transitionMs;
+      ch.transition = result.transition;
       if (result.changed) {
-        dev.rev++;
-        dev.stateDirty = true;
-        dev.stateChangedAt = millis();
+        ch.rev++;
+        ch.stateDirty = true;
+        ch.stateChangedAt = millis();
       }
       if (result.hasMode) {
-        dev.endRealtime = true;
-        dev.realtimeActive = false;
+        ch.endRealtime = true;
+        ch.realtimeActive = false;
       }
     }
   }
@@ -170,7 +186,7 @@ void handlePatchState() {
     sendError(400, err.message, err.field);
     return;
   }
-  sendState();
+  sendState(i);
 }
 
 void handleEffects() {
@@ -179,13 +195,18 @@ void handleEffects() {
   sendJson(200, doc);
 }
 
-void handlePatchConfig() {
+void handlePatchConfig(int i) {
   JsonDocument doc;
   if (!readBody(doc)) return;
+  if (i > 0 && doc.is<JsonObject>()) doc.remove("hostname");
   DeviceConfig c;
+  int otherPin[kStrips];  // pins of the other enabled strips
   {
     Lock lock;
-    c = dev.config;
+    c = dev.ch[i].config;
+    for (int j = 0; j < kStrips; j++) {
+      otherPin[j] = j != i && dev.ch[j].config.enabled ? dev.ch[j].config.dataPin : -1;
+    }
   }
   const DeviceConfig before = c;
   ApiError err;
@@ -193,13 +214,19 @@ void handlePatchConfig() {
     sendError(400, err.message, err.field);
     return;
   }
+  for (int pin : otherPin) {
+    if (c.enabled && pin == c.dataPin) {
+      sendError(400, "data_pin is used by another strip", "data_pin");
+      return;
+    }
+  }
   {
     Lock lock;
-    dev.config = c;
+    dev.ch[i].config = c;
   }
-  saveConfig(c);
-  if (strcmp(before.name, c.name) != 0) MDNS.setInstanceName(c.name);
-  sendConfig();
+  saveConfig(i, c);
+  if (i == 0 && strcmp(before.name, c.name) != 0) MDNS.setInstanceName(c.name);
+  sendConfig(i);
 }
 
 void handleReboot() {
@@ -208,8 +235,8 @@ void handleReboot() {
   dev.restartAt = millis() + 500;
 }
 
-void handleIdentify() {
-  showOverlay(Overlay::Identify);
+void handleIdentify(int i) {
+  showOverlay(Overlay::Identify, i);
   sendOk(202);
 }
 
@@ -340,22 +367,28 @@ void handleNotFound() {
   sendError(404, "not found");
 }
 
+// Routes of one strip under `prefix`.
+void routeStrip(const String& prefix, int i) {
+  server.on(prefix + "/state", HTTP_GET, [i] { sendState(i); });
+  server.on(prefix + "/state", HTTP_PATCH, [i] { handlePatchState(i); }, collectBody);
+  server.on(prefix + "/config", HTTP_GET, [i] { sendConfig(i); });
+  server.on(prefix + "/config", HTTP_PATCH, [i] { handlePatchConfig(i); }, collectBody);
+  server.on(prefix + "/identify", HTTP_POST, [i] { handleIdentify(i); });
+}
+
 }  // namespace
 
 void apiBegin() {
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/info", HTTP_GET, handleInfo);
-  server.on("/api/state", HTTP_GET, sendState);
-  server.on("/api/state", HTTP_PATCH, handlePatchState, collectBody);
   server.on("/api/effects", HTTP_GET, handleEffects);
-  server.on("/api/config", HTTP_GET, sendConfig);
-  server.on("/api/config", HTTP_PATCH, handlePatchConfig, collectBody);
   server.on("/api/reboot", HTTP_POST, handleReboot);
-  server.on("/api/identify", HTTP_POST, handleIdentify);
   server.on("/api/wifi/scan", HTTP_GET, handleScan);
   server.on("/api/wifi", HTTP_POST, handleSetWifi, collectBody);
   server.on("/api/wifi", HTTP_DELETE, handleForgetWifi);
   server.on("/api/ota", HTTP_POST, handleOta, otaUpload);
+  routeStrip("/api", 0);  // strip 0 also answers at the paths of the single-strip API
+  for (int i = 0; i < kStrips; i++) routeStrip("/api/strips/" + String(i), i);
   server.onNotFound(handleNotFound);
   server.enableCORS(true);
   const char* headers[] = {"X-Firmware-MD5"};

@@ -173,6 +173,10 @@ bool patchConfig(JsonVariantConst body, DeviceConfig& config, ApiError& err) {
     if (!s || !validHostname(s)) return fail(err, "hostname must match [a-z0-9-]{1,24}", "hostname");
     strcpy(c.hostname, s);
   }
+  if (!(v = body["enabled"]).isNull()) {
+    if (!v.is<bool>()) return fail(err, "enabled must be true or false", "enabled");
+    c.enabled = v.as<bool>();
+  }
   if (!(v = body["led_count"]).isNull()) {
     if (!readInt(v, 1, kMaxLeds, n)) return fail(err, "led_count must be an integer 1-480", "led_count");
     c.ledCount = static_cast<uint16_t>(n);
@@ -229,6 +233,7 @@ void writeConfig(JsonObject out, const DeviceConfig& c, bool rebootRequired) {
   // ArduinoJson stores a const char[N] by pointer as a literal of length N-1; a const char* is copied.
   out["name"] = static_cast<const char*>(c.name);
   out["hostname"] = static_cast<const char*>(c.hostname);
+  out["enabled"] = c.enabled;
   out["led_count"] = c.ledCount;
   out["data_pin"] = c.dataPin;
   out["color_order"] = kColorOrders[c.colorOrder];
@@ -243,7 +248,7 @@ void writeConfig(JsonObject out, const DeviceConfig& c, bool rebootRequired) {
 }
 
 bool rebootRequired(const DeviceConfig& stored, const DeviceConfig& running) {
-  return strcmp(stored.hostname, running.hostname) != 0 || stored.ledCount != running.ledCount ||
+  return strcmp(stored.hostname, running.hostname) != 0 || stored.enabled != running.enabled || stored.ledCount != running.ledCount ||
          stored.dataPin != running.dataPin;
 }
 
@@ -252,4 +257,8 @@ bool dataPinAllowed(int pin) {
     if (p == pin) return true;
   }
   return false;
+}
+
+void writeDataPins(JsonArray out) {
+  for (uint8_t p : kDataPins) out.add(p);
 }

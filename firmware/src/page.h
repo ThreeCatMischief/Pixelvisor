@@ -42,7 +42,10 @@ static const char kPage[] = R"html(<!doctype html>
 </head>
 <body>
 <main>
+<div class="seg hide" id="tabs"></div>
 <header><h1 id="name">Pixelvisor</h1><span id="status">connecting</span><button id="power">Off</button></header>
+<p id="off" class="note hide">This strip is switched off. Tick "Strip connected" in Settings, save and reboot to use it.</p>
+<div id="ctl">
 <div class="row"><label for="bri">Brightness</label><input type="range" id="bri" min="0" max="255"><span class="val" id="briv"></span></div>
 <hr>
 <div class="seg" id="mode"><button data-m="solid">Color</button><button data-m="effect">Effect</button></div>
@@ -51,12 +54,14 @@ static const char kPage[] = R"html(<!doctype html>
 <div class="row" id="c2row"><label for="c2">Color 2</label><input type="color" id="c2"><span></span></div>
 <div class="row" id="sprow"><label for="sp">Speed</label><input type="range" id="sp" min="0" max="255"><span class="val" id="spv"></span></div>
 <p id="rt" class="note hide"></p>
+</div>
 
 <details id="settings"><summary>Settings</summary>
 <div class="row"><label for="cname">Name</label><input type="text" id="cname" maxlength="32"><span></span></div>
-<div class="row"><label for="chost">Hostname</label><input type="text" id="chost" maxlength="24"><span class="val">.local</span></div>
+<div class="row"><label for="cen">Strip connected</label><input type="checkbox" id="cen"><span></span></div>
+<div class="row" id="hostrow"><label for="chost">Hostname</label><input type="text" id="chost" maxlength="24"><span class="val">.local</span></div>
 <div class="row"><label for="ccount">LED count</label><input type="number" id="ccount" min="1" max="480"><span></span></div>
-<div class="row"><label for="cpin">Data pin</label><input type="number" id="cpin" min="0" max="48"><span class="val">GPIO</span></div>
+<div class="row"><label for="cpin">Data pin</label><select id="cpin"></select><span class="val">GPIO</span></div>
 <div class="row"><label for="corder">Color order</label><select id="corder"><option>RGB</option><option>RBG</option><option>GRB</option><option>GBR</option><option>BRG</option><option>BGR</option></select><span></span></div>
 <div class="row"><label for="crev">Reverse</label><input type="checkbox" id="crev"><span></span></div>
 <div class="row"><label for="cmax">Current limit</label><input type="number" id="cmax" min="0" max="20000"><span class="val">mA</span></div>
@@ -65,7 +70,7 @@ static const char kPage[] = R"html(<!doctype html>
 <div class="row"><label for="cdither">Dither</label><input type="checkbox" id="cdither"><span></span></div>
 <div class="row"><label for="cpower">After power loss</label><select id="cpower"><option value="restore">Restore</option><option value="on">On</option><option value="off">Off</option></select><span></span></div>
 <div class="line"><span id="cmsg" class="note"></span><button id="csave" class="primary">Save</button></div>
-<p class="note">Reverse: the first LED is at the right end. Current limit: your supply's rating minus 300 mA; 0 turns limiting off.</p>
+<p class="note">Strip connected, LED count, data pin and hostname apply after a reboot. Two connected strips need different pins. Reverse: the first LED is at the right end. Current limit: your supply's rating minus 300 mA; 0 turns limiting off.</p>
 </details>
 
 <details><summary>Device</summary>
@@ -83,7 +88,9 @@ const hex=c=>'#'+c.map(v=>v.toString(16).padStart(2,'0')).join('');
 const rgb=h=>[1,3,5].map(p=>parseInt(h.substr(p,2),16));
 const show=(id,v)=>$(id).classList.toggle('hide',!v);
 function status(ok,msg){const s=$('status');s.className=ok?'ok':'err';s.textContent=msg}
+let S=+new URLSearchParams(location.search).get('strip')||0;  // the strip shown; ?strip=1 starts on the second
 async function call(method,path,body){
+  if(S&&/^\/api\/(state|identify|config)$/.test(path))path=path.replace('/api/',`/api/strips/${S}/`);
   const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},body:body&&JSON.stringify(body)});
   const j=await r.json();
   if(!r.ok)throw new Error(j.error||r.status);
@@ -121,29 +128,61 @@ async function flush(){
 async function load(){
   try{
     if(!fx.length){fx=await call('GET','/api/effects');$('eff').innerHTML=fx.map(f=>`<option value="${f.id}">${f.name}</option>`).join('')}
-    const s=await call('GET','/api/state');if(!busy){st=s;render()}
+    const n=S,s=await call('GET','/api/state');if(!busy&&n==S){st=s;render()}
     status(true,'connected');
   }catch(e){status(false,e.message)}
 }
+let info=null,first=true;
+function strip(){return ((info&&info.strips)||[])[S]||null}
+function draw(){
+  const t=strip(),all=(info&&info.strips)||[],off=!!t&&t.enabled===false;
+  show('tabs',all.length>1);
+  $('tabs').replaceChildren(...all.map(x=>{
+    const b=document.createElement('button');
+    b.textContent=x.name+(x.enabled===false?' (off)':'');b.classList.toggle('on',x.index==S);
+    b.onclick=()=>pick(x.index);return b;
+  }));
+  $('name').textContent=document.title=t?t.name:info.name;
+  $('info').textContent=`Firmware ${info.fw} · ${info.board} · ${t?t.led_count:info.led_count} LEDs · ${info.ip} · ${info.rssi} dBm · up ${Math.round(info.uptime_s/60)} min`;
+  show('ctl',!off);show('off',off);show('power',!off);show('hostrow',S==0);
+  if(off&&!$('settings').open)$('settings').open=true;
+}
+function pick(n){
+  S=n;st=null;pending={};cfg=null;
+  if(info)draw();
+  load();
+  if($('settings').open)loadConfig();
+}
 async function loadInfo(){
-  const i=await call('GET','/api/info');
-  $('name').textContent=document.title=i.name;
-  $('info').textContent=`Firmware ${i.fw} · ${i.board} · ${i.led_count} LEDs · ${i.ip} · ${i.rssi} dBm · up ${Math.round(i.uptime_s/60)} min`;
+  info=await call('GET','/api/info');
+  const all=info.strips||[];
+  if(first){
+    first=false;
+    // Start on the first strip that is switched on, unless the address names one.
+    if(!new URLSearchParams(location.search).has('strip')&&all.length&&all[S]&&all[S].enabled===false){
+      const on=all.find(x=>x.enabled!==false);if(on)S=on.index;
+    }
+  }
+  draw();
 }
 function fillConfig(c){
   cfg=c;
   $('cname').value=c.name;$('chost').value=c.hostname;$('ccount').value=c.led_count;$('cpin').value=c.data_pin;
+  $('cen').checked=c.enabled!==false;
+  $('cpin').replaceChildren(...((info&&info.data_pins)||[c.data_pin]).map(p=>new Option(p,p)));$('cpin').value=c.data_pin;
   $('corder').value=c.color_order;$('crev').checked=c.reverse;$('cmax').value=c.max_current_ma;
   [$('wbr').value,$('wbg').value,$('wbb').value]=c.white_balance;$('cgamma').value=c.gamma;
   $('cdither').checked=c.dither;$('cpower').value=c.power_on;
-  $('cmsg').textContent=c.reboot_required?'Saved. Reboot to apply LED count, pin or hostname.':'';
+  $('cmsg').textContent=c.reboot_required?'Saved. Reboot to apply strip, LED count, pin or hostname changes.':'';
 }
-$('settings').ontoggle=()=>{if($('settings').open)call('GET','/api/config').then(fillConfig).catch(e=>$('cmsg').textContent=e.message)};
+function loadConfig(){call('GET','/api/config').then(fillConfig).catch(e=>$('cmsg').textContent=e.message)}
+$('settings').ontoggle=()=>{if($('settings').open)loadConfig()};
 $('csave').onclick=async()=>{
   const n=id=>+$(id).value;
-  const next={name:$('cname').value,hostname:$('chost').value,led_count:n('ccount'),data_pin:n('cpin'),color_order:$('corder').value,
+  const next={name:$('cname').value,enabled:$('cen').checked,led_count:n('ccount'),data_pin:n('cpin'),color_order:$('corder').value,
     reverse:$('crev').checked,max_current_ma:n('cmax'),white_balance:[n('wbr'),n('wbg'),n('wbb')],gamma:n('cgamma'),
     dither:$('cdither').checked,power_on:$('cpower').value};
+  if(S==0)next.hostname=$('chost').value;  // the hostname belongs to the device, not to a second strip
   const diff={};for(const k in next)if(JSON.stringify(next[k])!=JSON.stringify(cfg[k]))diff[k]=next[k];
   if(!Object.keys(diff).length)return;
   try{fillConfig(await call('PATCH','/api/config',diff));if(!$('cmsg').textContent)$('cmsg').textContent='Saved.';loadInfo()}
@@ -172,8 +211,8 @@ $('c1').oninput=e=>patch({color:rgb(e.target.value),transition_ms:150});
 $('c2').oninput=e=>patch({effect:{color2:rgb(e.target.value)},transition_ms:150});
 $('sp').oninput=e=>patch({effect:{speed:+e.target.value}});
 $('identify').onclick=()=>call('POST','/api/identify').catch(e=>status(false,e.message));
-loadInfo().catch(()=>{});
-load();setInterval(load,3000);
+loadInfo().then(load,load);
+setInterval(load,3000);
 </script>
 </body>
 </html>

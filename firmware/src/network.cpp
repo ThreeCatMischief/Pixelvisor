@@ -53,9 +53,9 @@ void startMdns() {
   DeviceConfig c;
   {
     Lock lock;
-    c = dev.config;
+    c = dev.ch[0].config;
   }
-  if (!MDNS.begin(dev.running.hostname)) {
+  if (!MDNS.begin(dev.ch[0].running.hostname)) {
     ESP_LOGW(TAG, "mDNS failed to start; use the IP address");
     return;
   }
@@ -65,7 +65,8 @@ void startMdns() {
   MDNS.addServiceTxt("pixelvisor", "tcp", "id", static_cast<const char*>(dev.id));
   MDNS.addServiceTxt("pixelvisor", "tcp", "api", String(kApiVersion));
   MDNS.addServiceTxt("pixelvisor", "tcp", "fw", LB_FW_VERSION);
-  MDNS.addServiceTxt("pixelvisor", "tcp", "leds", String(dev.running.ledCount));
+  MDNS.addServiceTxt("pixelvisor", "tcp", "leds", String(dev.ch[0].running.ledCount));
+  MDNS.addServiceTxt("pixelvisor", "tcp", "strips", String(kStrips));
   MDNS.addServiceTxt("pixelvisor", "tcp", "ddp", String(kDdpPort));
   mdnsStarted = true;
 }
@@ -79,7 +80,7 @@ void netBegin() {
   password = prefs.getString("pass");
   prefs.end();
 
-  WiFi.setHostname(dev.running.hostname);  // before the interfaces start
+  WiFi.setHostname(dev.ch[0].running.hostname);  // before the interfaces start
   WiFi.setSleep(false);                    // modem sleep adds latency and drops realtime frames
   if (ssid.isEmpty()) {
     openPortal();
@@ -101,7 +102,7 @@ void netLoop() {
   if (connected && !wasConnected) {
     if (!mdnsStarted) startMdns();
     closePortal();
-    ESP_LOGI(TAG, "Connected: http://%s.local (%s, RSSI %d dBm)", dev.running.hostname,
+    ESP_LOGI(TAG, "Connected: http://%s.local (%s, RSSI %d dBm)", dev.ch[0].running.hostname,
              WiFi.localIP().toString().c_str(), WiFi.RSSI());
   } else if (!connected && wasConnected) {
     ESP_LOGW(TAG, "WiFi lost, reconnecting");

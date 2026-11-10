@@ -6,18 +6,18 @@ import SwiftUI
 @main
 struct PixelvisorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    private let model = AppModel.shared
+    private let hub = Hub.shared
 
     var body: some Scene {
         MenuBarExtra {
-            PanelView(model: model)
+            PanelView(hub: hub)
         } label: {
-            Image(nsImage: StatusIcon.image(model.iconState))
+            Image(nsImage: StatusIcon.image(hub.iconState))
         }
         .menuBarExtraStyle(.window)
 
         Settings {
-            SettingsView(model: model)
+            SettingsView(hub: hub)
         }
     }
 }
@@ -25,6 +25,6 @@ struct PixelvisorApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)  // also without the bundle's LSUIElement, e.g. `swift run`
-        AppModel.shared.start()
+        Hub.shared.start()
     }
 }

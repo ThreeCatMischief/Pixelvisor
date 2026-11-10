@@ -28,8 +28,9 @@ connected together.
 2. **Connect it to WiFi.** Power the light. On your phone, join the WiFi network called
    **Pixelvisor-xxxxxx**. A setup page opens. Pick your home WiFi, enter the password, tap
    *Connect*.
-3. **Use it.** Open <http://pixelvisor.local> in any browser on the same WiFi. On a Mac,
-   you can also install the [menu bar app](https://github.com/ThreeCatMischief/Pixelvisor/releases).
+3. **Use it.** Open <http://pixelvisor.local> in any browser on the same WiFi (Windows,
+   macOS, Linux, phones). On a Mac, you can also install the
+   [menu bar app](https://github.com/ThreeCatMischief/Pixelvisor/releases).
 
 That's it. The rest of this page is reference material.
 
@@ -54,6 +55,23 @@ That's it. The rest of this page is reference material.
 | 5 V supply | About 60 mA per LED at full white. A 3 A supply covers 43 LEDs. |
 
 The strip's data line goes to GPIO 4 (classic ESP32: GPIO 16).
+
+### Two strips
+
+One board can drive two independent strips, for example one on the monitor and one on a
+shelf or wall panel. Each has its own power, brightness, colors, effects and presets.
+
+- The first strip ("Monitor") is on by default. The second ("Skadis") is off until you
+  switch it on.
+- Wire the second strip's data line to GPIO 5 (classic ESP32: GPIO 17) and join the grounds
+  of both strips and the board.
+- Open Settings, pick the strip, tick *Strip connected*, set *LED count* and *Data pin*,
+  save and reboot. Either strip can be used alone; the pins of both can be any of the
+  pins the settings list offers, as long as they differ.
+- The strips share the power supply. Set each strip's *Current limit* so the two together
+  stay below the supply's rating minus 300 mA.
+- The web page and the Mac app show a tab per strip. Names are editable.
+- For other tools: DDP output 1 is the first strip, output 2 the second, 255 both.
 
 ## Other ways to install the firmware
 
@@ -88,6 +106,13 @@ Open Settings in the web page or the app:
 - **Reverse** if the first LED is at the right end. To check: `python3 tools/ddp_send.py
   pixelvisor.local --pattern index` lights the first LED red and the last blue.
 
+## Windows
+
+There is no separate Windows app. The web page at <http://pixelvisor.local> has power,
+brightness, color, effects and strip tabs, and all settings, including LED count, data pin, firmware update and WiFi reset. Windows 10 and 11
+resolve `.local` names; otherwise use the bar's IP address. Screen mirroring and Follow
+monitor need the Mac app.
+
 ## macOS app
 
 Download `Pixelvisor-macOS-<version>.zip` from the
@@ -97,7 +122,9 @@ launch, right-click it and choose *Open*, or allow it under System Settings → 
 Security. macOS asks for Local Network access; the app needs it to find the bar.
 
 Menu bar panel with power, brightness and four color sources: Color, White, Effect and
-Mirror. Presets store a source with its values.
+Mirror. Presets store a source with its values. With two strips switched on, a tab bar at
+the top switches between them; each strip keeps its own settings, including Mirror and Follow
+monitor.
 
 - **Follow monitor** sets the bar's brightness from your external monitor's brightness.
   With [MonitorControl](https://github.com/MonitorControl/MonitorControl) installed, it

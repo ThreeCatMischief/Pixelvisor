@@ -27,13 +27,34 @@ The device advertises `_http._tcp` (for browsers) and this service:
 | `id` | `a1b2c3` | Device ID: last 3 bytes of the WiFi MAC, lowercase hex. Stable across renames. |
 | `api` | `1` | API major version |
 | `fw` | `0.1.0` | Firmware version (SemVer) |
-| `leds` | `43` | Configured LED count |
+| `leds` and `strips` | `43`, `2` | `leds` is the LED count of strip 0; `strips` is the number of strips (absent: 1). |
 | `ddp` | `4048` | Realtime UDP port |
 
 Clients identify a device by `id`, not by name, hostname or IP. Clients resolve the service
 to an IP address and port and use those for all requests; `.local` lookups per request are
 slow. Clients take the port from the service record and do not assume 80 (the mock device
 uses 8080).
+
+## Strips
+
+One device can drive several independent strips (the reference build has two: 0 `Monitor` on
+GPIO 4, 1 `Skadis` on GPIO 5). A build can use either strip or both: a strip's `enabled`
+and `data_pin` are config. Each strip has its own state, config, effects position,
+realtime stream and `rev`. `GET /api/info` lists them in `strips`.
+
+| Path | Meaning |
+| --- | --- |
+| `/api/strips/<n>/state`, `/config`, `/identify` | Strip `n` (0-based). |
+| `/api/state`, `/api/config`, `/api/identify` | Alias of strip 0, as in a single-strip device. |
+| `/api/info`, `/api/effects`, `/api/reboot`, `/api/wifi`, `/api/ota` | Device-level; no strip prefix. |
+
+`hostname` belongs to the device and is part of strip 0's config only; strips 1 and up omit
+it from `GET` and ignore it in `PATCH`. `data_pin` must differ between strips (400
+otherwise). `name` is per strip; the mDNS instance name is strip 0's. Realtime frames are
+addressed by DDP destination ID (see [Realtime: DDP](#realtime-ddp)).
+
+Clients that know one strip keep working: strip 0 is unchanged. Clients ignore
+`strips` when absent and treat the device as one strip.
 
 ## LED indexing
 
@@ -80,9 +101,18 @@ Static and diagnostic information.
   "rssi": -54,
   "uptime_s": 86400,
   "free_heap": 182000,
-  "ddp": { "port": 4048, "max_leds": 480 }
+  "ddp": { "port": 4048, "max_leds": 480 },
+  "strips": [
+    { "index": 0, "name": "Monitor", "enabled": true, "led_count": 43, "data_pin": 4 },
+    { "index": 1, "name": "Skadis", "enabled": true, "led_count": 43, "data_pin": 5 }
+  ],
+  "data_pins": [0, 1, 3, 4, 5, 6, 7, 10, 20]
 }
 ```
+
+`name` and `led_count` at the top level are strip 0's. `strips[].enabled`, `led_count` and
+`data_pin` are the values the device booted with (`config` may hold newer ones that await a
+reboot). `data_pins` lists the GPIOs the board accepts for `data_pin`.
 
 ### `GET /api/state`
 
@@ -181,8 +211,9 @@ Hardware and device configuration. Changes here are rare and done from a setting
 | --- | --- | --- | --- |
 | `name` | string, 1–32 characters, at most 63 bytes of UTF-8 | no | Display name and mDNS instance name. |
 | `hostname` | `[a-z0-9-]{1,24}` | yes | mDNS hostname. |
+| `enabled` | bool | yes | `false` when the strip is not wired: the device drives no pin for it and clients hide it. Default `true`; a second strip is off by default in public builds. |
 | `led_count` | 1–480 | yes | 480 is the DDP single-packet limit. |
-| `data_pin` | GPIO number | yes | Validated against a per-board allowlist. |
+| `data_pin` | GPIO number | yes | One of `data_pins` from `GET /api/info`. Two enabled strips cannot share a pin (400). |
 | `color_order` | `RGB` `RBG` `GRB` `GBR` `BRG` `BGR` | no | WS2812B is `GRB`. |
 | `reverse` | bool | no | Set when the physical first LED is at the right end. See [LED indexing](#led-indexing). |
 | `max_current_ma` | 100–20000, or 0 | no | Current limit; 0 disables limiting. |
@@ -256,7 +287,7 @@ bar, and the bar can be tested without the app.
 | 0 | 1 | Flags | `0x41` = version 1 + PUSH. Bits: `VV x T S R Q P`. |
 | 1 | 1 | Sequence | Low 4 bits, 1–15 wrapping; 0 = unused. |
 | 2 | 1 | Data type | `0x0B` = RGB, 8 bit per channel. |
-| 3 | 1 | Destination | `1` = default output. |
+| 3 | 1 | Destination | Output ID: strip index + 1 (`1` = strip 0, `2` = strip 1). `255` = all strips. |
 | 4 | 4 | Offset | Byte offset into the frame, big-endian. |
 | 8 | 2 | Length | Payload length in bytes, big-endian. |
 | 10 | n | Payload | `r g b r g b …` |
@@ -268,7 +299,8 @@ at offset 14. The firmware skips them.
 
 - Reject packets whose version bits are not `01`.
 - Accept data types `0x00`, `0x01` and `0x0B` as RGB24; drop other types.
-- Accept destinations `1` and `255`; drop others.
+- Accept the strip's own destination (strip index + 1) and `255`; drop others. Each strip
+  keeps its own frame buffer and stream.
 - Write the payload to the frame buffer at `offset`. Bytes beyond `led_count * 3` are
   dropped.
 - Show the frame when a packet with PUSH arrives. Senders with ≤ 480 LEDs send one packet

@@ -117,6 +117,17 @@ struct DeviceInfo: Codable, Hashable, Sendable {
         var maxLeds: Int
     }
 
+    /// One output of the device. Older firmware reports none and has a single strip.
+    struct Strip: Codable, Hashable, Sendable {
+        var index: Int
+        var name: String
+        var enabled: Bool?  // absent on firmware without the option: enabled
+        var ledCount: Int
+        var dataPin: Int
+
+        var isEnabled: Bool { enabled ?? true }
+    }
+
     var api: Int
     var fw: String
     var id: String
@@ -129,6 +140,11 @@ struct DeviceInfo: Codable, Hashable, Sendable {
     var uptimeS: Int
     var freeHeap: Int
     var ddp: DDP
+    var strips: [Strip]?
+    /// GPIOs the board accepts as a data pin.
+    var dataPins: [Int]?
+
+    func strip(_ index: Int) -> Strip? { strips?.first { $0.index == index } }
 }
 
 struct EffectInfo: Codable, Hashable, Sendable, Identifiable {
@@ -141,7 +157,8 @@ struct EffectInfo: Codable, Hashable, Sendable, Identifiable {
 
 struct DeviceConfig: Codable, Hashable, Sendable {
     var name: String
-    var hostname: String
+    var hostname: String?  // absent on strips other than the first
+    var enabled: Bool?
     var ledCount: Int
     var dataPin: Int
     var colorOrder: String
@@ -162,6 +179,7 @@ struct DeviceConfig: Codable, Hashable, Sendable {
 struct ConfigPatch: Codable, Hashable, Sendable {
     var name: String?
     var hostname: String?
+    var enabled: Bool?
     var ledCount: Int?
     var dataPin: Int?
     var colorOrder: String?
@@ -178,6 +196,8 @@ extension ConfigPatch {
     /// The fields the settings window edits that differ between `base` and `draft`.
     init(from base: DeviceConfig, to draft: DeviceConfig) {
         if draft.name != base.name { name = draft.name }
+        if draft.enabled != base.enabled { enabled = draft.enabled }
+        if draft.dataPin != base.dataPin { dataPin = draft.dataPin }
         if draft.ledCount != base.ledCount { ledCount = draft.ledCount }
         if draft.colorOrder != base.colorOrder { colorOrder = draft.colorOrder }
         if draft.reverse != base.reverse { reverse = draft.reverse }

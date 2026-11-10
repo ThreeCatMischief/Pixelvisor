@@ -8,12 +8,13 @@
 
 struct DdpPacket {
   bool push;
+  uint8_t destination;
   uint32_t offset;  // byte offset into the frame
   const uint8_t* data;
   uint16_t length;
 };
 
-// Parses a DDP header. False for packets the receiver drops.
+// Parses a DDP header. False for packets the receiver drops (destination is checked by Realtime).
 bool parseDdp(const uint8_t* buf, size_t len, DdpPacket& out);
 
 class Realtime {
@@ -21,7 +22,8 @@ class Realtime {
   static constexpr uint32_t kTimeoutMs = 2500;
   static constexpr uint32_t kBlockMs = 1000;
 
-  void begin(uint16_t ledCount);
+  // `destination` is the DDP output ID this receiver answers to (strip index + 1); 255 reaches all.
+  void begin(uint16_t ledCount, uint8_t destination = 1);
   // Handles one UDP datagram from `sourceIp`. Frames are ignored while the light is off.
   void receive(uint32_t sourceIp, const uint8_t* buf, size_t len, bool on, uint32_t now);
   // PATCH with `mode`: ends the stream and ignores its sender until it has paused for
@@ -33,6 +35,7 @@ class Realtime {
 
  private:
   uint16_t bytes_ = 0;
+  uint8_t destination_ = 1;
   bool streaming_ = false;
   uint32_t lastFrame_ = 0;
   uint32_t source_ = 0;

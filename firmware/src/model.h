@@ -4,6 +4,7 @@
 
 #include <ArduinoJson.h>
 #include <stdint.h>
+#include <string.h>
 
 // Compile-time defaults, each settable from platformio.ini.
 #ifndef LB_FW_VERSION
@@ -21,6 +22,19 @@
 #ifndef LB_DEFAULT_DATA_PIN
 #define LB_DEFAULT_DATA_PIN 4
 #endif
+// Second strip (index 1): name, LED count and data pin.
+#ifndef LB_STRIP1_NAME
+#define LB_STRIP1_NAME "Skadis"
+#endif
+#ifndef LB_STRIP1_LED_COUNT
+#define LB_STRIP1_LED_COUNT 43
+#endif
+#ifndef LB_STRIP1_ENABLED
+#define LB_STRIP1_ENABLED 0  // a build with a second strip wired sets 1
+#endif
+#ifndef LB_STRIP1_DATA_PIN
+#define LB_STRIP1_DATA_PIN 5
+#endif
 #ifndef LB_DEFAULT_MAX_CURRENT_MA
 #define LB_DEFAULT_MAX_CURRENT_MA 1500
 #endif
@@ -31,6 +45,7 @@
 #endif
 
 constexpr int kApiVersion = 1;
+constexpr int kStrips = 2;  // independent outputs, each with its own state and config
 constexpr uint16_t kMaxLeds = 480;  // DDP single-packet limit
 constexpr uint16_t kDdpPort = 4048;
 
@@ -64,6 +79,7 @@ enum class PowerOn : uint8_t { Restore, On, Off };
 struct DeviceConfig {
   char name[64] = LB_DEFAULT_NAME;  // 1-32 characters, UTF-8
   char hostname[25] = LB_DEFAULT_HOSTNAME;
+  bool enabled = true;  // a disabled strip drives no pin and clients hide it
   uint16_t ledCount = LB_DEFAULT_LED_COUNT;
   uint8_t dataPin = LB_DEFAULT_DATA_PIN;
   uint8_t colorOrder = 2;  // index into kColorOrders: GRB
@@ -75,6 +91,18 @@ struct DeviceConfig {
   bool dither = true;
   PowerOn powerOn = PowerOn::Restore;
 };
+
+// Factory config of strip `strip`. Only the first strip carries the device hostname.
+inline DeviceConfig defaultConfig(int strip) {
+  DeviceConfig c;
+  if (strip == 1) {
+    strcpy(c.name, LB_STRIP1_NAME);
+    c.enabled = LB_STRIP1_ENABLED;
+    c.ledCount = LB_STRIP1_LED_COUNT;
+    c.dataPin = LB_STRIP1_DATA_PIN;
+  }
+  return c;
+}
 
 inline constexpr const char* kColorOrders[] = {"RGB", "RBG", "GRB", "GBR", "BRG", "BGR"};
 
@@ -106,3 +134,5 @@ void writeConfig(JsonObject out, const DeviceConfig& c, bool rebootRequired);
 // True when a field that applies only after a reboot differs.
 bool rebootRequired(const DeviceConfig& stored, const DeviceConfig& running);
 bool dataPinAllowed(int pin);
+// Writes the GPIOs accepted as data_pin, for clients that offer a choice.
+void writeDataPins(JsonArray out);

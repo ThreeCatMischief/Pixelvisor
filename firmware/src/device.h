@@ -7,9 +7,8 @@
 #include "model.h"
 #include "render.h"
 
-struct Device {
-  SemaphoreHandle_t mutex = nullptr;
-  char id[7] = "";        // last 3 bytes of the WiFi MAC; set at boot
+// One strip: its config, light state and the flags exchanged with the render task.
+struct Channel {
   DeviceConfig config;    // as stored; reboot fields take effect after a restart
   DeviceConfig running;   // as booted; read-only after setup()
   LightState state;
@@ -24,6 +23,12 @@ struct Device {
   uint16_t progress = 0;          // permille, for Overlay::Progress
   bool stateDirty = false;        // persisted 5 s after the last change
   uint32_t stateChangedAt = 0;
+};
+
+struct Device {
+  SemaphoreHandle_t mutex = nullptr;
+  char id[7] = "";        // last 3 bytes of the WiFi MAC; set at boot
+  Channel ch[kStrips];
   uint32_t restartAt = 0;         // 0: no restart scheduled
   bool portal = false;            // setup portal open (network.cpp)
 };
@@ -38,17 +43,21 @@ class Lock {
   Lock& operator=(const Lock&) = delete;
 };
 
-inline void showOverlay(Overlay o) {
+// Shows a status overlay on strip `strip`, or on all strips when negative.
+inline void showOverlay(Overlay o, int strip = -1) {
   Lock lock;
-  dev.overlay = o;
-  dev.overlayStart = millis();
-  dev.progress = 0;
+  for (int i = 0; i < kStrips; i++) {
+    if (strip >= 0 && i != strip) continue;
+    dev.ch[i].overlay = o;
+    dev.ch[i].overlayStart = millis();
+    dev.ch[i].progress = 0;
+  }
 }
 
 inline void setProgress(uint16_t permille) {
   Lock lock;
-  dev.progress = permille;
+  for (Channel& c : dev.ch) c.progress = permille;
 }
 
-// Stores the config in NVS (main.cpp).
-void saveConfig(const DeviceConfig& c);
+// Stores the config of strip `strip` in NVS (main.cpp).
+void saveConfig(int strip, const DeviceConfig& c);

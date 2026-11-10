@@ -5,9 +5,23 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
-    let model: AppModel
+    let hub: Hub
 
     var body: some View {
+        let model = hub.settingsModel
+        VStack(spacing: 12) {
+            Picker("Strip", selection: Binding(get: { hub.settingsSelected }, set: { hub.settingsSelected = $0 })) {
+                ForEach(hub.models, id: \.index) { Text($0.isEnabled ? $0.deviceName : "\($0.deviceName) (off)").tag($0.index) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            tabs(model).id(hub.settingsSelected)
+        }
+        .frame(width: 560, height: 680)
+        .padding(20)
+    }
+
+    private func tabs(_ model: AppModel) -> some View {
         TabView {
             GeneralTab(model: model).tabItem { Label("General", systemImage: "gearshape") }
             DeviceTab(model: model).tabItem { Label("Device", systemImage: "light.strip.2") }
@@ -15,8 +29,6 @@ struct SettingsView: View {
             MirrorTab(model: model).tabItem { Label("Mirror", systemImage: "display") }
             AboutTab().tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 560, height: 640)
-        .padding(20)
     }
 }
 
@@ -66,10 +78,7 @@ private struct DeviceTab: View {
                     TextField("Manual address", text: $manual, prompt: Text("192.168.1.42:80"))
                     Button("Use") { message = model.useManualEndpoint(manual) ? nil : "Enter host or host:port" }
                     if model.settings.manualEndpoint != nil {
-                        Button("Clear") {
-                            model.settings.manualEndpoint = nil
-                            model.connect()
-                        }
+                        Button("Clear") { model.clearManualEndpoint() }
                     }
                 }
                 if let info = model.info {
@@ -82,8 +91,14 @@ private struct DeviceTab: View {
             }
 
             if draft != nil {
-                Section("Configuration") {
+                Section("Configuration: \(model.deviceName)") {
                     TextField("Name", text: binding(\.name))
+                    Toggle("Strip connected", isOn: Binding(get: { draft?.enabled ?? true }, set: { draft?.enabled = $0 }))
+                        .help("Turn off when this strip is not wired. A strip that is off drives no pin and has no tab in the panel. Applies after a reboot.")
+                    Picker("Data pin (GPIO)", selection: binding(\.dataPin)) {
+                        ForEach(pinChoices, id: \.self) { Text("GPIO \($0)").tag($0) }
+                    }
+                    .help("GPIO the strip's data line is wired to. Applies after a reboot. The two strips need different pins.")
                     TextField("LED count", value: binding(\.ledCount), format: .number.grouping(.never))
                     Picker("Color order", selection: binding(\.colorOrder)) {
                         ForEach(DeviceConfig.colorOrders, id: \.self) { Text($0) }
@@ -149,6 +164,13 @@ private struct DeviceTab: View {
         } message: {
             Text("The device restarts and opens its setup network until you choose a WiFi network again.")
         }
+    }
+
+    /// The pins the board accepts, plus the current one if the firmware does not report a list.
+    private var pinChoices: [Int] {
+        let pins = model.info?.dataPins ?? []
+        let current = draft?.dataPin ?? 0
+        return pins.contains(current) ? pins : (pins + [current]).sorted()
     }
 
     private func binding<T>(_ path: WritableKeyPath<DeviceConfig, T>) -> Binding<T> {
@@ -252,7 +274,7 @@ private struct MirrorTab: View {
 
     var body: some View {
         let mirror = model.deviceSettings.mirror
-        let leds = model.info?.ledCount ?? 43
+        let leds = model.ledCount
         Form {
             Picker("Display", selection: Binding(get: { mirror.displayUUID ?? "" }, set: { set(\.displayUUID, $0.isEmpty ? nil : $0) })) {
                 Text("Main display").tag("")
